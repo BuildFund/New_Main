@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../api';
 import { theme, commonStyles } from '../styles/theme';
+import { tokenStorage } from '../utils/tokenStorage';
 import Button from '../components/Button';
 import Badge from '../components/Badge';
 import Select from '../components/Select';
@@ -27,11 +28,25 @@ function DealRoom() {
   const [stepUpAuth, setStepUpAuth] = useState({ required: false, verified: false, docId: null, action: null });
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [docUploadForm, setDocUploadForm] = useState({ category: 'compliance', description: '' });
+  const [providerStages, setProviderStages] = useState([]);
+  const [completionBlockers, setCompletionBlockers] = useState([]);
+
+  // Determine user role (must be before useEffect that uses it)
+  const role = tokenStorage.getRole();
+  const isConsultant = role === 'Consultant';
+  const isLender = role === 'Lender';
+  const isBorrower = role === 'Borrower';
 
   useEffect(() => {
     loadDeal();
     loadTimeline();
     loadDocuments();
+    if (isConsultant) {
+      loadProviderStages();
+    }
+    if (isBorrower || isLender) {
+      loadCompletionReadiness();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId]);
 
@@ -101,6 +116,28 @@ function DealRoom() {
     }
   }
 
+  async function loadProviderStages() {
+    try {
+      const res = await api.get(`/api/deals/provider-stages/?deal_id=${dealId}`);
+      setProviderStages(res.data.results || res.data || []);
+    } catch (err) {
+      console.error('Failed to load provider stages:', err);
+      setProviderStages([]);
+    }
+  }
+
+  async function loadCompletionReadiness() {
+    try {
+      const res = await api.get(`/api/deals/deals/${dealId}/completion-readiness/`);
+      if (res.data && res.data.blockers) {
+        setCompletionBlockers(res.data.blockers || []);
+      }
+    } catch (err) {
+      console.error('Failed to load completion readiness:', err);
+      setCompletionBlockers([]);
+    }
+  }
+
   async function loadDocuments() {
     try {
       const res = await api.get(`/api/deals/deal-documents/?deal_id=${dealId}`);
@@ -152,8 +189,8 @@ function DealRoom() {
 
   async function handleViewDocument(docLinkId) {
     try {
-      const sessionKey = localStorage.getItem('stepUpSessionKey');
-      const expiresAt = localStorage.getItem('stepUpExpiresAt');
+      const sessionKey = tokenStorage.getStepUpSessionKey();
+      const expiresAt = localStorage.getItem('stepUpExpiresAt'); // Keep this in localStorage for expiry check
       
       // Check if step-up session is still valid
       if (expiresAt && new Date(expiresAt) > new Date()) {
@@ -184,8 +221,8 @@ function DealRoom() {
 
   async function handleDownloadDocument(docLinkId) {
     try {
-      const sessionKey = localStorage.getItem('stepUpSessionKey');
-      const expiresAt = localStorage.getItem('stepUpExpiresAt');
+      const sessionKey = tokenStorage.getStepUpSessionKey();
+      const expiresAt = localStorage.getItem('stepUpExpiresAt'); // Keep this in localStorage for expiry check
       
       // Check if step-up session is still valid
       if (expiresAt && new Date(expiresAt) > new Date()) {
@@ -300,20 +337,15 @@ function DealRoom() {
     );
   }
 
-  // Determine user role
-  const role = localStorage.getItem('role');
-  const isConsultant = role === 'Consultant';
-  const isLender = role === 'Lender';
-  const isBorrower = role === 'Borrower';
-
-  // Filter tabs based on role
+  // Filter tabs based on role (role variables defined above)
   const allTabs = [
     { id: 'overview', label: 'Overview', roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
     { id: 'timeline', label: 'Timeline', roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
     { id: 'tasks', label: `Tasks (${tasks.length})`, roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
+    { id: 'my-progress', label: 'My Progress', roles: ['Consultant'] },
     { id: 'documents', label: 'Documents', roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
     { id: 'underwriter-report', label: "Underwriter's Report", roles: ['Lender', 'Admin'] },
-    { id: 'consultants', label: 'Consultants', roles: ['Lender', 'Borrower', 'Admin'] },
+    { id: 'consultants', label: 'Consultants', roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
     { id: 'legal-workspace', label: 'Legal Workspace', roles: ['Lender', 'Borrower', 'Admin'] },
     { id: 'drawdowns', label: 'Drawdowns', roles: ['Lender', 'Borrower', 'Admin'] },
     { id: 'audit-log', label: 'Audit Log', roles: ['Lender', 'Admin'] },
@@ -465,20 +497,65 @@ function DealRoom() {
                 <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0`, fontSize: theme.typography.fontSize['2xl'] }}>
                   Commercial Terms
                 </h2>
-                <pre style={{
-                  margin: 0,
-                  padding: theme.spacing.md,
-                  background: theme.colors.gray50,
-                  borderRadius: theme.borderRadius.md,
-                  overflow: 'auto',
-                  fontSize: theme.typography.fontSize.sm,
-                  whiteSpace: 'pre-wrap',
-                  wordWrap: 'break-word',
-                }}>
-                  {typeof deal.commercial_terms === 'string' 
-                    ? deal.commercial_terms 
-                    : JSON.stringify(deal.commercial_terms, null, 2)}
-                </pre>
+                {typeof deal.commercial_terms === 'object' && deal.commercial_terms !== null ? (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: theme.spacing.md }}>
+                    {deal.commercial_terms.loan_amount && (
+                      <div>
+                        <p style={{ margin: `${theme.spacing.xs} 0`, color: theme.colors.textSecondary, fontSize: theme.typography.fontSize.sm }}>
+                          <strong>Loan Amount:</strong>
+                        </p>
+                        <p style={{ margin: 0 }}>£{parseFloat(deal.commercial_terms.loan_amount).toLocaleString()}</p>
+                      </div>
+                    )}
+                    {deal.commercial_terms.interest_rate && (
+                      <div>
+                        <p style={{ margin: `${theme.spacing.xs} 0`, color: theme.colors.textSecondary, fontSize: theme.typography.fontSize.sm }}>
+                          <strong>Interest Rate:</strong>
+                        </p>
+                        <p style={{ margin: 0 }}>{deal.commercial_terms.interest_rate}%</p>
+                      </div>
+                    )}
+                    {deal.commercial_terms.term_months && (
+                      <div>
+                        <p style={{ margin: `${theme.spacing.xs} 0`, color: theme.colors.textSecondary, fontSize: theme.typography.fontSize.sm }}>
+                          <strong>Term:</strong>
+                        </p>
+                        <p style={{ margin: 0 }}>{deal.commercial_terms.term_months} months</p>
+                      </div>
+                    )}
+                    {deal.commercial_terms.ltv_ratio && (
+                      <div>
+                        <p style={{ margin: `${theme.spacing.xs} 0`, color: theme.colors.textSecondary, fontSize: theme.typography.fontSize.sm }}>
+                          <strong>LTV Ratio:</strong>
+                        </p>
+                        <p style={{ margin: 0 }}>{deal.commercial_terms.ltv_ratio}%</p>
+                      </div>
+                    )}
+                    {deal.commercial_terms.product_name && (
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <p style={{ margin: `${theme.spacing.xs} 0`, color: theme.colors.textSecondary, fontSize: theme.typography.fontSize.sm }}>
+                          <strong>Product:</strong>
+                        </p>
+                        <p style={{ margin: 0 }}>{deal.commercial_terms.product_name}</p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <pre style={{
+                    margin: 0,
+                    padding: theme.spacing.md,
+                    background: theme.colors.gray50,
+                    borderRadius: theme.borderRadius.md,
+                    overflow: 'auto',
+                    fontSize: theme.typography.fontSize.sm,
+                    whiteSpace: 'pre-wrap',
+                    wordWrap: 'break-word',
+                  }}>
+                    {typeof deal.commercial_terms === 'string' 
+                      ? deal.commercial_terms 
+                      : JSON.stringify(deal.commercial_terms, null, 2)}
+                  </pre>
+                )}
               </div>
             )}
 
@@ -525,16 +602,159 @@ function DealRoom() {
                     background: theme.colors.gray50,
                     borderRadius: theme.borderRadius.md,
                   }}>
-                    <pre style={{
-                      margin: 0,
-                      fontSize: theme.typography.fontSize.sm,
-                      whiteSpace: 'pre-wrap',
-                      wordWrap: 'break-word',
-                    }}>
-                      {typeof deal.completion_readiness_breakdown === 'string'
-                        ? deal.completion_readiness_breakdown
-                        : JSON.stringify(deal.completion_readiness_breakdown, null, 2)}
-                    </pre>
+                    {typeof deal.completion_readiness_breakdown === 'object' && deal.completion_readiness_breakdown !== null ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
+                        {Array.isArray(deal.completion_readiness_breakdown) ? (
+                          deal.completion_readiness_breakdown.map((item, idx) => (
+                            <div key={idx} style={{
+                              padding: theme.spacing.sm,
+                              background: theme.colors.white,
+                              borderRadius: theme.borderRadius.sm,
+                              border: `1px solid ${theme.colors.gray300}`,
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontWeight: theme.typography.fontWeight.medium }}>
+                                  {item.category || item.name || `Item ${idx + 1}`}
+                                </span>
+                                {item.current !== undefined && item.required !== undefined ? (
+                                  <span style={{ fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                    {item.current} / {item.required}
+                                  </span>
+                                ) : item.status ? (
+                                  <Badge variant={item.status === 'complete' || item.status === 'satisfied' ? 'success' : 'warning'}>
+                                    {item.status}
+                                  </Badge>
+                                ) : null}
+                              </div>
+                              {item.note && (
+                                <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                  {item.note}
+                                </p>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          Object.entries(deal.completion_readiness_breakdown).map(([key, value]) => (
+                            <div key={key} style={{
+                              padding: theme.spacing.sm,
+                              background: theme.colors.white,
+                              borderRadius: theme.borderRadius.sm,
+                            }}>
+                              <strong>{key}:</strong> {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    ) : (
+                      <pre style={{
+                        margin: 0,
+                        fontSize: theme.typography.fontSize.sm,
+                        whiteSpace: 'pre-wrap',
+                        wordWrap: 'break-word',
+                      }}>
+                        {typeof deal.completion_readiness_breakdown === 'string'
+                          ? deal.completion_readiness_breakdown
+                          : JSON.stringify(deal.completion_readiness_breakdown, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                )}
+                
+                {/* Action Items for Borrowers */}
+                {isBorrower && deal.completion_readiness_score !== null && deal.completion_readiness_score < 100 && (
+                  <div style={{ ...commonStyles.card, marginTop: theme.spacing.lg }}>
+                    <h3 style={{ margin: `0 0 ${theme.spacing.md} 0`, fontSize: theme.typography.fontSize.xl }}>
+                      What You Need to Do
+                    </h3>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
+                      {/* Check incomplete borrower tasks */}
+                      {tasks.filter(t => t.owner_party_type === 'borrower' && t.status !== 'completed').length > 0 && (
+                        <div style={{
+                          padding: theme.spacing.md,
+                          background: theme.colors.warningLight,
+                          borderRadius: theme.borderRadius.sm,
+                          border: `1px solid ${theme.colors.warning}`,
+                        }}>
+                          <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontWeight: theme.typography.fontWeight.semibold }}>
+                            📋 Complete Your Tasks
+                          </p>
+                          <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm }}>
+                            You have {tasks.filter(t => t.owner_party_type === 'borrower' && t.status !== 'completed').length} incomplete task(s). 
+                            Go to the <strong>Tasks</strong> tab to complete them.
+                          </p>
+                        </div>
+                      )}
+                      
+                      {/* Show completion blockers if available */}
+                      {completionBlockers.length > 0 && (
+                        <div style={{
+                          padding: theme.spacing.md,
+                          background: theme.colors.errorLight,
+                          borderRadius: theme.borderRadius.sm,
+                          border: `1px solid ${theme.colors.error}`,
+                        }}>
+                          <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontWeight: theme.typography.fontWeight.semibold }}>
+                            ⚠️ Blocking Completion
+                          </p>
+                          <ul style={{ margin: `${theme.spacing.xs} 0 0 0`, paddingLeft: theme.spacing.lg, fontSize: theme.typography.fontSize.sm }}>
+                            {completionBlockers.map((blocker, idx) => (
+                              <li key={idx}>{blocker}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      
+                      {/* Check open requisitions */}
+                      <div style={{
+                        padding: theme.spacing.md,
+                        background: theme.colors.infoLight,
+                        borderRadius: theme.borderRadius.sm,
+                        border: `1px solid ${theme.colors.info}`,
+                      }}>
+                        <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontWeight: theme.typography.fontWeight.semibold }}>
+                          📝 Legal Requirements
+                        </p>
+                        <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm }}>
+                          Check the <strong>Legal Workspace</strong> tab to:
+                        </p>
+                        <ul style={{ margin: `${theme.spacing.xs} 0 0 0`, paddingLeft: theme.spacing.lg, fontSize: theme.typography.fontSize.sm }}>
+                          <li>Approve or satisfy Conditions Precedent (CPs)</li>
+                          <li>Respond to any open requisitions from the lender's solicitor</li>
+                        </ul>
+                      </div>
+                      
+                      {/* Check documents */}
+                      <div style={{
+                        padding: theme.spacing.md,
+                        background: theme.colors.infoLight,
+                        borderRadius: theme.borderRadius.sm,
+                        border: `1px solid ${theme.colors.info}`,
+                      }}>
+                        <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontWeight: theme.typography.fontWeight.semibold }}>
+                          📎 Upload Required Documents
+                        </p>
+                        <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm }}>
+                          Go to the <strong>Documents</strong> tab to upload any required documents for CPs, tasks, or drawdowns.
+                        </p>
+                      </div>
+                      
+                      {/* Check drawdowns if applicable */}
+                      {deal.facility_type === 'development' && (
+                        <div style={{
+                          padding: theme.spacing.md,
+                          background: theme.colors.infoLight,
+                          borderRadius: theme.borderRadius.sm,
+                          border: `1px solid ${theme.colors.info}`,
+                        }}>
+                          <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontWeight: theme.typography.fontWeight.semibold }}>
+                            💰 Request Drawdowns
+                          </p>
+                          <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm }}>
+                            Go to the <strong>Drawdowns</strong> tab to request funding as milestones are reached.
+                          </p>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -837,25 +1057,39 @@ function DealRoom() {
                         <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xs, alignItems: 'flex-end' }}>
                           {task.status !== 'completed' && (
                             <>
-                              <Button
-                                size="sm"
-                                variant="success"
-                                onClick={() => {
-                                  if (window.confirm('Mark this task as completed?')) {
-                                    completeTask(task.id);
-                                  }
-                                }}
-                              >
-                                Complete
-                              </Button>
-                              {task.assignee_name && (
+                              {/* Show Complete button if:
+                                  - User is lender/admin (can complete any task)
+                                  - User is borrower and task is owned by borrower
+                                  - User is consultant and task is assigned to them
+                                  Note: Backend will validate permissions */}
+                              {(
+                                isLender || 
+                                (isBorrower && task.owner_party_type === 'borrower') ||
+                                (isConsultant && task.owner_party_type && ['valuer', 'monitoring_surveyor', 'solicitor'].includes(task.owner_party_type))
+                              ) && (
                                 <Button
                                   size="sm"
-                                  variant="outline"
-                                  onClick={() => sendChaseReminder(task.id)}
+                                  variant="success"
+                                  onClick={() => {
+                                    if (window.confirm('Mark this task as completed?')) {
+                                      completeTask(task.id);
+                                    }
+                                  }}
                                 >
-                                  Chase
+                                  Complete
                                 </Button>
+                              )}
+                              {/* Show Chase button for lenders/admins or if borrower is owner and task is assigned to someone else */}
+                              {task.assignee_name && (
+                                (isLender || (isBorrower && task.owner_party_type === 'borrower')) && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => sendChaseReminder(task.id)}
+                                  >
+                                    Chase
+                                  </Button>
+                                )
                               )}
                             </>
                           )}
@@ -1059,6 +1293,177 @@ function DealRoom() {
       {activeTab === 'underwriter-report' && (
         <div style={commonStyles.card}>
           <p style={{ color: theme.colors.textSecondary }}>Underwriter's Report functionality coming soon...</p>
+        </div>
+      )}
+
+      {activeTab === 'my-progress' && isConsultant && (
+        <div>
+          <div style={commonStyles.card}>
+            <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>My Progress</h2>
+            {providerStages.length === 0 ? (
+              <p style={{ color: theme.colors.textSecondary, textAlign: 'center', padding: theme.spacing.xl }}>
+                You haven't been selected as a provider for this deal yet.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xl }}>
+                {providerStages.map(stage => {
+                  const roleDisplay = stage.role_type_display || stage.role_type;
+                  const stageDisplay = stage.current_stage_display || stage.current_stage.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+                  const tasks = stage.tasks || [];
+                  const completedTasks = tasks.filter(t => t.status === 'completed').length;
+                  const totalTasks = tasks.length;
+                  const progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+                  
+                  return (
+                    <div key={stage.id} style={{
+                      padding: theme.spacing.lg,
+                      border: `1px solid ${theme.colors.gray300}`,
+                      borderRadius: theme.borderRadius.md,
+                      background: theme.colors.white,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: theme.spacing.md }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
+                            <h3 style={{ margin: 0 }}>{roleDisplay}</h3>
+                            <Badge color={theme.colors.primary}>{stageDisplay}</Badge>
+                            {stage.completed_at && (
+                              <Badge color={theme.colors.success}>Completed</Badge>
+                            )}
+                          </div>
+                          {stage.stage_entered_at && (
+                            <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Stage entered: {new Date(stage.stage_entered_at).toLocaleDateString()}
+                            </p>
+                          )}
+                          {totalTasks > 0 && (
+                            <div style={{ marginTop: theme.spacing.sm }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: theme.spacing.xs }}>
+                                <span style={{ fontSize: theme.typography.fontSize.sm }}>Progress</span>
+                                <span style={{ fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                                  {completedTasks} / {totalTasks} tasks
+                                </span>
+                              </div>
+                              <div style={{
+                                width: '100%',
+                                height: 8,
+                                background: theme.colors.gray200,
+                                borderRadius: theme.borderRadius.sm,
+                                overflow: 'hidden',
+                              }}>
+                                <div style={{
+                                  width: `${progressPercent}%`,
+                                  height: '100%',
+                                  background: progressPercent === 100 ? theme.colors.success : theme.colors.primary,
+                                  transition: 'width 0.3s ease',
+                                }} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {stage.next_stage && !stage.completed_at && (
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                await api.post(`/api/deals/provider-stages/${stage.id}/advance_stage/`);
+                                await loadProviderStages();
+                                await loadTimeline();
+                              } catch (err) {
+                                console.error('Failed to advance stage:', err);
+                                alert('Failed to advance stage: ' + (err.response?.data?.error || err.message));
+                              }
+                            }}
+                          >
+                            Advance to Next Stage
+                          </Button>
+                        )}
+                      </div>
+                      
+                      {/* Tasks */}
+                      {tasks.length > 0 && (
+                        <div style={{ marginTop: theme.spacing.lg }}>
+                          <h4 style={{ margin: `0 0 ${theme.spacing.md} 0`, fontSize: theme.typography.fontSize.lg }}>
+                            My Tasks
+                          </h4>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
+                            {tasks.map(task => {
+                              const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'completed';
+                              const priorityColors = {
+                                critical: theme.colors.error,
+                                high: theme.colors.warning,
+                                medium: theme.colors.info,
+                                low: theme.colors.gray500,
+                              };
+                              
+                              return (
+                                <div
+                                  key={task.id}
+                                  style={{
+                                    padding: theme.spacing.md,
+                                    border: `1px solid ${task.status === 'completed' ? theme.colors.success : theme.colors.gray300}`,
+                                    borderRadius: theme.borderRadius.sm,
+                                    background: task.status === 'completed' ? theme.colors.successLight : theme.colors.white,
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                                    <div style={{ flex: 1 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
+                                        <h5 style={{ margin: 0, fontSize: theme.typography.fontSize.md }}>
+                                          {task.title}
+                                        </h5>
+                                        <Badge color={priorityColors[task.priority] || theme.colors.gray500} style={{ fontSize: theme.typography.fontSize.xs }}>
+                                          {task.priority}
+                                        </Badge>
+                                        {task.status === 'completed' && (
+                                          <Badge color={theme.colors.success}>Completed</Badge>
+                                        )}
+                                        {isOverdue && task.status !== 'completed' && (
+                                          <Badge color={theme.colors.error}>Overdue</Badge>
+                                        )}
+                                      </div>
+                                      {task.description && (
+                                        <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                          {task.description}
+                                        </p>
+                                      )}
+                                      {task.due_date && (
+                                        <span style={{ fontSize: theme.typography.fontSize.sm, color: isOverdue ? theme.colors.error : theme.colors.textSecondary }}>
+                                          Due: {new Date(task.due_date).toLocaleDateString()}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {task.status !== 'completed' && (
+                                      <Button
+                                        variant="primary"
+                                        size="sm"
+                                        onClick={async () => {
+                                          try {
+                                            await api.post(`/api/deals/deal-tasks/${task.id}/complete/`);
+                                            await loadProviderStages();
+                                            await loadTimeline();
+                                          } catch (err) {
+                                            console.error('Failed to complete task:', err);
+                                            alert('Failed to complete task: ' + (err.response?.data?.error || err.message));
+                                          }
+                                        }}
+                                      >
+                                        Mark Complete
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

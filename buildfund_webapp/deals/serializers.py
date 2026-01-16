@@ -220,6 +220,9 @@ class DealMessageThreadSerializer(serializers.ModelSerializer):
     
     thread_type_display = serializers.CharField(source='get_thread_type_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
+    message_count = serializers.SerializerMethodField()
+    unread_count = serializers.SerializerMethodField()
+    visible_to_party_names = serializers.SerializerMethodField()
     
     def get_created_by_name(self, obj):
         """Get created_by user name."""
@@ -227,14 +230,39 @@ class DealMessageThreadSerializer(serializers.ModelSerializer):
             return obj.created_by.get_full_name() or obj.created_by.username
         return None
     
+    def get_message_count(self, obj):
+        """Get count of messages in thread."""
+        return obj.messages.count()
+    
+    def get_unread_count(self, obj):
+        """Get count of unread messages (placeholder - would need read tracking)."""
+        # TODO: Implement read tracking
+        return 0
+    
+    def get_visible_to_party_names(self, obj):
+        """Get names of parties that can see this thread."""
+        parties = obj.visible_to_parties.all()
+        names = []
+        for party in parties:
+            if party.user:
+                names.append(party.user.get_full_name() or party.user.username)
+            elif party.borrower_profile:
+                names.append(party.borrower_profile.company_name or 'Borrower')
+            elif party.lender_profile:
+                names.append(party.lender_profile.organisation_name)
+            elif party.consultant_profile:
+                names.append(party.consultant_profile.organisation_name)
+        return names
+    
     class Meta:
         model = DealMessageThread
         fields = [
             'id', 'deal', 'thread_type', 'thread_type_display', 'subject',
-            'created_by', 'created_by_name', 'visible_to_parties',
+            'created_by', 'created_by_name', 'visible_to_parties', 'visible_to_party_names',
+            'visible_to_roles', 'is_private', 'message_count', 'unread_count',
             'created_at', 'updated_at', 'last_message_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at', 'last_message_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'last_message_at', 'message_count', 'unread_count', 'visible_to_party_names']
 
 
 class DealMessageSerializer(serializers.ModelSerializer):
@@ -242,6 +270,8 @@ class DealMessageSerializer(serializers.ModelSerializer):
     
     sender_name = serializers.SerializerMethodField()
     sender_user_name = serializers.SerializerMethodField()
+    sender_role = serializers.SerializerMethodField()
+    is_own_message = serializers.SerializerMethodField()
     
     def get_sender_name(self, obj):
         """Get sender party name."""
@@ -249,9 +279,11 @@ class DealMessageSerializer(serializers.ModelSerializer):
             if obj.sender.user:
                 return obj.sender.user.get_full_name() or obj.sender.user.username
             if obj.sender.borrower_profile:
-                return f"{obj.sender.borrower_profile.first_name} {obj.sender.borrower_profile.last_name}".strip()
+                return obj.sender.borrower_profile.company_name or 'Borrower'
             if obj.sender.lender_profile:
                 return obj.sender.lender_profile.organisation_name
+            if obj.sender.consultant_profile:
+                return obj.sender.consultant_profile.organisation_name
         return "Unknown"
     
     def get_sender_user_name(self, obj):
@@ -260,13 +292,26 @@ class DealMessageSerializer(serializers.ModelSerializer):
             return obj.sender_user.get_full_name() or obj.sender_user.username
         return None
     
+    def get_sender_role(self, obj):
+        """Get sender's role/party type."""
+        if obj.sender:
+            return obj.sender.get_party_type_display() if hasattr(obj.sender, 'get_party_type_display') else obj.sender.party_type
+        return None
+    
+    def get_is_own_message(self, obj):
+        """Check if message is from current user."""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return False
+        return obj.sender_user == request.user
+    
     class Meta:
         model = DealMessage
         fields = [
-            'id', 'thread', 'sender', 'sender_name', 'sender_user', 'sender_user_name',
-            'message', 'attachments', 'created_at', 'updated_at',
+            'id', 'thread', 'sender', 'sender_name', 'sender_role', 'sender_user', 'sender_user_name',
+            'message', 'attachments', 'is_own_message', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'is_own_message']
 
 
 class DealDocumentLinkSerializer(serializers.ModelSerializer):
@@ -501,16 +546,54 @@ class ProviderStageInstanceSerializer(serializers.ModelSerializer):
     
     provider_firm_name = serializers.CharField(source='provider_firm.organisation_name', read_only=True)
     role_type_display = serializers.CharField(source='get_role_type_display', read_only=True)
+    current_stage_display = serializers.SerializerMethodField()
+    next_stage = serializers.SerializerMethodField()
+    tasks = serializers.SerializerMethodField()
     
     class Meta:
         model = ProviderStageInstance
         fields = [
             'id', 'deal', 'role_type', 'role_type_display', 'provider_firm', 'provider_firm_name',
-            'current_stage', 'stage_entered_at', 'stage_history',
+            'current_stage', 'current_stage_display', 'stage_entered_at', 'stage_history',
             'instructed_at', 'started_at', 'completed_at',
-            'created_at', 'updated_at',
+            'next_stage', 'tasks', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'stage_entered_at', 'created_at', 'updated_at']
+    
+    def get_current_stage_display(self, obj):
+        """Get display name for current stage."""
+        from .provider_workflow_templates import get_provider_stage_template
+        template = get_provider_stage_template(obj.role_type, obj.current_stage)
+        if template:
+            return template.get('display_name', obj.current_stage.replace('_', ' ').title())
+        return obj.current_stage.replace('_', ' ').title()
+    
+    def get_next_stage(self, obj):
+        """Get next stage name if available."""
+        from .provider_workflow_templates import get_next_provider_stage
+        return get_next_provider_stage(obj.role_type, obj.current_stage)
+    
+    def get_tasks(self, obj):
+        """Get tasks for this provider stage instance."""
+        from .models import DealTask, DealParty
+        
+        # Find provider's party
+        provider_party = DealParty.objects.filter(
+            deal=obj.deal,
+            consultant_profile=obj.provider_firm,
+            party_type=obj.role_type
+        ).first()
+        
+        if not provider_party:
+            return []
+        
+        # Get tasks assigned to this provider party
+        tasks = DealTask.objects.filter(
+            deal=obj.deal,
+            assignee_party=provider_party
+        ).select_related('stage').order_by('due_date', 'priority', 'created_at')
+        
+        return DealTaskSerializer(tasks, many=True, context=self.context).data
 
 
 class ProviderDeliverableSerializer(serializers.ModelSerializer):
@@ -524,6 +607,9 @@ class ProviderDeliverableSerializer(serializers.ModelSerializer):
     reviewed_by_name = serializers.SerializerMethodField()
     document_name = serializers.CharField(source='document.file_name', read_only=True)
     document_size = serializers.IntegerField(source='document.file_size', read_only=True)
+    document_url = serializers.SerializerMethodField()
+    has_revisions = serializers.SerializerMethodField()
+    revision_count = serializers.SerializerMethodField()
     
     def get_uploaded_by_name(self, obj):
         if obj.uploaded_by:
@@ -535,17 +621,32 @@ class ProviderDeliverableSerializer(serializers.ModelSerializer):
             return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
         return None
     
+    def get_document_url(self, obj):
+        """Get document download URL."""
+        if obj.document:
+            return f"/api/documents/{obj.document.id}/download/"
+        return None
+    
+    def get_has_revisions(self, obj):
+        """Check if this deliverable has revisions."""
+        return obj.revisions.exists()
+    
+    def get_revision_count(self, obj):
+        """Get count of revisions."""
+        return obj.revisions.count()
+    
     class Meta:
         model = ProviderDeliverable
         fields = [
             'id', 'deal', 'role_type', 'role_type_display', 'provider_firm', 'provider_firm_name',
             'deliverable_type', 'deliverable_type_display', 'status', 'status_display', 'version',
-            'document', 'document_name', 'document_size',
+            'document', 'document_name', 'document_size', 'document_url',
             'uploaded_at', 'uploaded_by', 'uploaded_by_name',
             'reviewed_at', 'reviewed_by', 'reviewed_by_name', 'review_notes',
+            'version_history', 'parent_deliverable', 'has_revisions', 'revision_count',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'uploaded_at', 'reviewed_at', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'uploaded_at', 'reviewed_at', 'version', 'version_history', 'created_at', 'updated_at']
 
 
 class ProviderAppointmentSerializer(serializers.ModelSerializer):
@@ -556,6 +657,10 @@ class ProviderAppointmentSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     proposed_by_name = serializers.SerializerMethodField()
     confirmed_by_name = serializers.SerializerMethodField()
+    can_confirm = serializers.SerializerMethodField()
+    can_reschedule = serializers.SerializerMethodField()
+    can_cancel = serializers.SerializerMethodField()
+    can_complete = serializers.SerializerMethodField()
     
     def get_proposed_by_name(self, obj):
         if obj.proposed_by:
@@ -567,6 +672,44 @@ class ProviderAppointmentSerializer(serializers.ModelSerializer):
             return obj.confirmed_by.get_full_name() or obj.confirmed_by.username
         return None
     
+    def get_can_confirm(self, obj):
+        """Check if current user can confirm this appointment."""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return False
+        is_borrower = hasattr(request.user, 'borrowerprofile') and obj.deal.borrower_company == request.user.borrowerprofile
+        is_lender = hasattr(request.user, 'lenderprofile') and obj.deal.lender == request.user.lenderprofile
+        return (is_borrower or is_lender) and obj.status == 'proposed'
+    
+    def get_can_reschedule(self, obj):
+        """Check if current user can reschedule this appointment."""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return False
+        is_borrower = hasattr(request.user, 'borrowerprofile') and obj.deal.borrower_company == request.user.borrowerprofile
+        is_lender = hasattr(request.user, 'lenderprofile') and obj.deal.lender == request.user.lenderprofile
+        is_provider = hasattr(request.user, 'consultantprofile') and obj.provider_firm == request.user.consultantprofile
+        return (is_borrower or is_lender or is_provider) and obj.status in ['confirmed', 'rescheduled']
+    
+    def get_can_cancel(self, obj):
+        """Check if current user can cancel this appointment."""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return False
+        is_borrower = hasattr(request.user, 'borrowerprofile') and obj.deal.borrower_company == request.user.borrowerprofile
+        is_lender = hasattr(request.user, 'lenderprofile') and obj.deal.lender == request.user.lenderprofile
+        is_provider = hasattr(request.user, 'consultantprofile') and obj.provider_firm == request.user.consultantprofile
+        return (is_borrower or is_lender or is_provider) and obj.status not in ['cancelled', 'completed']
+    
+    def get_can_complete(self, obj):
+        """Check if current user can mark this appointment as completed."""
+        request = self.context.get('request')
+        if not request or not request.user:
+            return False
+        is_provider = hasattr(request.user, 'consultantprofile') and obj.provider_firm == request.user.consultantprofile
+        is_lender = hasattr(request.user, 'lenderprofile') and obj.deal.lender == request.user.lenderprofile
+        return (is_provider or is_lender) and obj.status in ['confirmed', 'rescheduled']
+    
     class Meta:
         model = ProviderAppointment
         fields = [
@@ -574,6 +717,7 @@ class ProviderAppointmentSerializer(serializers.ModelSerializer):
             'status', 'status_display', 'date_time', 'location', 'notes',
             'proposed_slots', 'proposed_by', 'proposed_by_name',
             'confirmed_at', 'confirmed_by', 'confirmed_by_name',
+            'can_confirm', 'can_reschedule', 'can_cancel', 'can_complete',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'confirmed_at', 'created_at', 'updated_at']

@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { tokenStorage } from './utils/tokenStorage';
 
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
@@ -38,21 +39,25 @@ import ConsultantEnquiryDetail from './pages/ConsultantEnquiryDetail';
 import ConsultantAppointmentDetail from './pages/ConsultantAppointmentDetail';
 import DealsList from './pages/DealsList';
 import DealRoom from './pages/DealRoom';
+import QuoteDetail from './pages/QuoteDetail';
 
 function App() {
-  const [token, setToken] = React.useState(() => localStorage.getItem('token'));
-  const [role, setRole] = React.useState(() => localStorage.getItem('role'));
+  // Migrate from localStorage on mount (before state initialization)
+  // This ensures tokens are loaded into memory before the component checks for them
+  tokenStorage.migrateFromLocalStorage();
+
+  const [token, setToken] = React.useState(() => tokenStorage.getToken());
+  const [role, setRole] = React.useState(() => tokenStorage.getRole());
 
   const handleLogin = (tok, userRole) => {
-    localStorage.setItem('token', tok);
-    localStorage.setItem('role', userRole);
+    tokenStorage.setToken(tok);
+    tokenStorage.setRole(userRole);
     setToken(tok);
     setRole(userRole);
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('role');
+    tokenStorage.clearAll();
     setToken(null);
     setRole(null);
   };
@@ -102,6 +107,7 @@ function App() {
         <Route path="/lender/applications/:id/borrower-info" element={<LayoutWrapper><BorrowerInformation /></LayoutWrapper>} />
         <Route path="/lender/deals" element={<LayoutWrapper><DealsList /></LayoutWrapper>} />
         <Route path="/deals/:dealId" element={<LayoutWrapper><DealRoom /></LayoutWrapper>} />
+        <Route path="/deals/:dealId/quotes/:quoteId" element={<LayoutWrapper><QuoteDetail /></LayoutWrapper>} />
         <Route path="/lender/documents" element={<LayoutWrapper><Documents /></LayoutWrapper>} />
         <Route path="/lender/messages" element={<LayoutWrapper><Messages /></LayoutWrapper>} />
         <Route path="/lender/private-equity" element={<LayoutWrapper><LenderPrivateEquity /></LayoutWrapper>} />

@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api';
 import { theme, commonStyles } from '../styles/theme';
+import { tokenStorage } from '../utils/tokenStorage';
 import Button from './Button';
 import Badge from './Badge';
 import Select from './Select';
@@ -8,9 +10,11 @@ import Textarea from './Textarea';
 import Input from './Input';
 
 function ConsultantsTab({ dealId, deal, onUpdate }) {
-  const role = localStorage.getItem('role');
+  const navigate = useNavigate();
+  const role = tokenStorage.getRole();
   const isLender = role === 'Lender';
   const isBorrower = role === 'Borrower';
+  const isConsultant = role === 'Consultant';
   
   const [parties, setParties] = useState([]);
   const [consultants, setConsultants] = useState([]);
@@ -27,10 +31,38 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
   const [enquiries, setEnquiries] = useState([]);
   const [quotes, setQuotes] = useState([]);
   const [selections, setSelections] = useState([]);
+  const [providerStages, setProviderStages] = useState([]);
+  const [deliverables, setDeliverables] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [messageThreads, setMessageThreads] = useState([]);
+  const [providerMetrics, setProviderMetrics] = useState(null);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
+  const [selectedThread, setSelectedThread] = useState(null);
+  const [threadMessages, setThreadMessages] = useState([]);
+  const [newMessageText, setNewMessageText] = useState('');
+  const [createThreadModal, setCreateThreadModal] = useState({ open: false });
   const [requestQuotesModal, setRequestQuotesModal] = useState({ open: false, roleType: null, selectedProviders: [] });
+  const [uploadDeliverableModal, setUploadDeliverableModal] = useState({ open: false, deliverableType: null, roleType: null });
+  const [reviewDeliverableModal, setReviewDeliverableModal] = useState({ open: false, deliverable: null });
+  const [bookAppointmentModal, setBookAppointmentModal] = useState({ open: false, roleType: null, providerFirm: null });
+  const [appointmentActionModal, setAppointmentActionModal] = useState({ open: false, appointment: null, action: null });
   const [loadingMatching, setLoadingMatching] = useState(false);
   const [selectProviderModal, setSelectProviderModal] = useState({ open: false, quote: null, useOwnSolicitor: false, lenderApprovalRequired: false });
   const [ownSolicitorForm, setOwnSolicitorForm] = useState({ firm_name: '', sra_number: '', contact_name: '', contact_email: '', contact_phone: '' });
+  
+  // Enquiry and Quote detail modals
+  const [enquiryDetailModal, setEnquiryDetailModal] = useState({ open: false, enquiry: null });
+  const [quoteDetailModal, setQuoteDetailModal] = useState({ open: false, quote: null });
+  const [quoteActionModal, setQuoteActionModal] = useState({ open: false, quote: null, action: null, notes: '', counterPrice: '' });
+  const [enquiryMessages, setEnquiryMessages] = useState([]);
+  const [quoteMessages, setQuoteMessages] = useState([]);
+  const [newEnquiryMessage, setNewEnquiryMessage] = useState('');
+  const [newQuoteMessage, setNewQuoteMessage] = useState('');
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  
+  // Forward quotes to borrower
+  const [selectedQuotesForForward, setSelectedQuotesForForward] = useState([]);
+  const [forwardQuotesModal, setForwardQuotesModal] = useState({ open: false, notes: '' });
 
   useEffect(() => {
     loadParties();
@@ -38,6 +70,9 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
     loadEnquiries();
     loadQuotes();
     loadSelections();
+    loadProviderStages();
+    loadDeliverables();
+    loadAppointments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId]);
 
@@ -52,7 +87,7 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
   async function loadParties() {
     try {
       const res = await api.get(`/api/deals/deal-parties/?deal_id=${dealId}`);
-      setParties(res.data || []);
+      setParties(res.data?.results || res.data || []);
     } catch (err) {
       console.error('Failed to load parties:', err);
       setParties([]);
@@ -74,7 +109,7 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
   async function loadEnquiries() {
     try {
       const res = await api.get(`/api/deals/provider-enquiries/?deal_id=${dealId}`);
-      setEnquiries(res.data || []);
+      setEnquiries(res.data?.results || res.data || []);
     } catch (err) {
       console.error('Failed to load enquiries:', err);
       setEnquiries([]);
@@ -84,7 +119,7 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
   async function loadQuotes() {
     try {
       const res = await api.get(`/api/deals/provider-quotes/?deal_id=${dealId}`);
-      setQuotes(res.data || []);
+      setQuotes(res.data?.results || res.data || []);
     } catch (err) {
       console.error('Failed to load quotes:', err);
       setQuotes([]);
@@ -94,10 +129,106 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
   async function loadSelections() {
     try {
       const res = await api.get(`/api/deals/deal-provider-selections/?deal_id=${dealId}`);
-      setSelections(res.data || []);
+      setSelections(res.data?.results || res.data || []);
     } catch (err) {
       console.error('Failed to load selections:', err);
       setSelections([]);
+    }
+  }
+
+  async function loadProviderStages() {
+    try {
+      const res = await api.get(`/api/deals/provider-stages/?deal_id=${dealId}`);
+      setProviderStages(res.data.results || res.data || []);
+    } catch (err) {
+      console.error('Failed to load provider stages:', err);
+      setProviderStages([]);
+    }
+  }
+
+  async function loadDeliverables() {
+    try {
+      const res = await api.get(`/api/deals/provider-deliverables/?deal_id=${dealId}`);
+      setDeliverables(res.data.results || res.data || []);
+    } catch (err) {
+      console.error('Failed to load deliverables:', err);
+      setDeliverables([]);
+    }
+  }
+
+  async function loadAppointments() {
+    try {
+      const res = await api.get(`/api/deals/provider-appointments/?deal_id=${dealId}`);
+      setAppointments(res.data.results || res.data || []);
+    } catch (err) {
+      console.error('Failed to load appointments:', err);
+      setAppointments([]);
+    }
+  }
+
+  async function loadMessageThreads() {
+    try {
+      const res = await api.get(`/api/deals/deal-message-threads/?deal_id=${dealId}`);
+      setMessageThreads(res.data.results || res.data || []);
+    } catch (err) {
+      console.error('Failed to load message threads:', err);
+      setMessageThreads([]);
+    }
+  }
+
+  async function loadThreadMessages(threadId) {
+    try {
+      const res = await api.get(`/api/deals/deal-messages/?thread_id=${threadId}`);
+      const messages = res.data.results || res.data || [];
+      setThreadMessages(messages);
+      // Also set enquiry/quote messages if we're in those modals
+      if (enquiryDetailModal.open) {
+        setEnquiryMessages(messages);
+      }
+      if (quoteDetailModal.open) {
+        setQuoteMessages(messages);
+      }
+    } catch (err) {
+      console.error('Failed to load thread messages:', err);
+      setThreadMessages([]);
+      if (enquiryDetailModal.open) setEnquiryMessages([]);
+      if (quoteDetailModal.open) setQuoteMessages([]);
+    }
+  }
+
+  async function sendMessage(threadId) {
+    if (!newMessageText.trim()) {
+      alert('Please enter a message');
+      return;
+    }
+
+    try {
+      await api.post('/api/deals/deal-messages/', {
+        thread: threadId,
+        message: newMessageText,
+      });
+      setNewMessageText('');
+      await loadThreadMessages(threadId);
+      await loadMessageThreads(); // Refresh thread list to update last_message_at
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      alert('Failed to send message: ' + (err.response?.data?.error || err.message));
+    }
+  }
+
+  async function createThread(threadType, subject) {
+    try {
+      const res = await api.post('/api/deals/deal-message-threads/', {
+        deal: dealId,
+        thread_type: threadType,
+        subject: subject,
+      });
+      await loadMessageThreads();
+      setSelectedThread(res.data);
+      setCreateThreadModal({ open: false });
+    } catch (err) {
+      console.error('Failed to create thread:', err);
+      alert('Failed to create thread: ' + (err.response?.data?.error || err.message));
     }
   }
 
@@ -223,6 +354,148 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
     }
   }
 
+  async function loadProviderMetrics() {
+    setLoadingMetrics(true);
+    try {
+      const res = await api.get(`/api/deals/provider-metrics/deal/${dealId}/`);
+      setProviderMetrics(res.data);
+    } catch (err) {
+      console.error('Failed to load provider metrics:', err);
+      setProviderMetrics(null);
+    } finally {
+      setLoadingMetrics(false);
+    }
+  }
+
+  async function loadEnquiryMessages(enquiryId) {
+    setLoadingMessages(true);
+    try {
+      const enquiry = enquiryDetailModal.enquiry;
+      if (!enquiry) return;
+
+      // Determine thread type based on role
+      let threadType = 'general';
+      if (enquiry.role_type === 'valuer') threadType = 'valuation';
+      else if (enquiry.role_type === 'monitoring_surveyor') threadType = 'ims';
+      else if (enquiry.role_type === 'solicitor') threadType = 'legal';
+
+      // Try to find existing thread
+      const threadsRes = await api.get(`/api/deals/deal-message-threads/?deal_id=${dealId}&thread_type=${threadType}`);
+      const threads = threadsRes.data.results || threadsRes.data || [];
+      
+      // Find or create thread for this enquiry
+      let thread = threads.find(t => t.subject && t.subject.includes(enquiry.provider_firm_name));
+      
+      if (!thread && threads.length > 0) {
+        // Use first thread of this type if exists
+        thread = threads[0];
+      } else if (!thread) {
+        // Create new thread for this enquiry
+        try {
+          const newThreadRes = await api.post('/api/deals/deal-message-threads/', {
+            deal: dealId,
+            thread_type: threadType,
+            subject: `Quote Request: ${enquiry.provider_firm_name} - ${enquiry.role_type_display}`,
+          });
+          thread = newThreadRes.data;
+        } catch (createErr) {
+          console.error('Failed to create thread:', createErr);
+        }
+      }
+
+      if (thread) {
+        await loadThreadMessages(thread.id);
+        setSelectedThread(thread);
+      } else {
+        setEnquiryMessages([]);
+      }
+    } catch (err) {
+      console.error('Failed to load enquiry messages:', err);
+      setEnquiryMessages([]);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }
+
+  async function loadQuoteMessages(quoteId) {
+    setLoadingMessages(true);
+    try {
+      const quote = quoteDetailModal.quote;
+      if (!quote) return;
+
+      // Determine thread type based on role
+      let threadType = 'general';
+      if (quote.role_type === 'valuer') threadType = 'valuation';
+      else if (quote.role_type === 'monitoring_surveyor') threadType = 'ims';
+      else if (quote.role_type === 'solicitor') threadType = 'legal';
+
+      // Try to find existing thread
+      const threadsRes = await api.get(`/api/deals/deal-message-threads/?deal_id=${dealId}&thread_type=${threadType}`);
+      const threads = threadsRes.data.results || threadsRes.data || [];
+      
+      // Find or create thread for this quote
+      let thread = threads.find(t => t.subject && t.subject.includes(quote.provider_firm_name));
+      
+      if (!thread && threads.length > 0) {
+        thread = threads[0];
+      } else if (!thread) {
+        // Create new thread for this quote
+        try {
+          const newThreadRes = await api.post('/api/deals/deal-message-threads/', {
+            deal: dealId,
+            thread_type: threadType,
+            subject: `Quote Discussion: ${quote.provider_firm_name} - ${quote.role_type_display}`,
+          });
+          thread = newThreadRes.data;
+        } catch (createErr) {
+          console.error('Failed to create thread:', createErr);
+        }
+      }
+
+      if (thread) {
+        await loadThreadMessages(thread.id);
+        setSelectedThread(thread);
+      } else {
+        setQuoteMessages([]);
+      }
+    } catch (err) {
+      console.error('Failed to load quote messages:', err);
+      setQuoteMessages([]);
+    } finally {
+      setLoadingMessages(false);
+    }
+  }
+
+  async function handleQuoteAction() {
+    const { quote, action, notes, counterPrice } = quoteActionModal;
+    if (!quote) return;
+
+    try {
+      let endpoint = '';
+      let payload = {};
+
+      if (action === 'accept') {
+        endpoint = `/api/deals/provider-quotes/${quote.id}/accept/`;
+        payload = { notes };
+      } else if (action === 'reject') {
+        endpoint = `/api/deals/provider-quotes/${quote.id}/reject/`;
+        payload = { reason: notes };
+      } else if (action === 'negotiate') {
+        endpoint = `/api/deals/provider-quotes/${quote.id}/negotiate/`;
+        payload = { notes, counter_price: counterPrice || null };
+      }
+
+      await api.post(endpoint, payload);
+      await loadQuotes();
+      await loadSelections();
+      setQuoteActionModal({ open: false, quote: null, action: null, notes: '', counterPrice: '' });
+      alert(`Quote ${action === 'accept' ? 'accepted' : action === 'reject' ? 'rejected' : 'negotiation requested'} successfully`);
+      if (onUpdate) onUpdate();
+    } catch (err) {
+      alert('Failed to ' + action + ' quote: ' + (err.response?.data?.error || err.message));
+    }
+  }
+
   async function handleInviteConsultant() {
     try {
       await api.post('/api/deals/deal-parties/invite_consultant/', {
@@ -301,18 +574,26 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
     { id: 'deliverables', label: 'Deliverables' },
     { id: 'appointments', label: 'Appointments' },
     { id: 'messages', label: 'Messages' },
+    { id: 'reporting', label: 'Reporting' },
   ] : [];
 
   // Borrower sub-tabs
   const borrowerSubTabs = isBorrower ? [
     { id: 'quotes', label: `Quotes (${quotes.length})` },
     { id: 'selection', label: `Selection (${selections.length})` },
-    { id: 'appointments', label: 'Appointments' },
+    { id: 'appointments', label: `Appointments (${appointments.length})` },
     { id: 'deliverables', label: 'Deliverables' },
     { id: 'messages', label: 'Messages' },
   ] : [];
 
-  const subTabs = isLender ? lenderSubTabs : isBorrower ? borrowerSubTabs : [];
+  // Consultant sub-tabs
+  const consultantSubTabs = isConsultant ? [
+    { id: 'deliverables', label: `Deliverables (${deliverables.length})` },
+    { id: 'appointments', label: `Appointments (${appointments.length})` },
+    { id: 'messages', label: 'Messages' },
+  ] : [];
+
+  const subTabs = isLender ? lenderSubTabs : isBorrower ? borrowerSubTabs : isConsultant ? consultantSubTabs : [];
 
   if (loading) {
     return (
@@ -678,6 +959,60 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
         // Lender view: flat list
         return (
           <div>
+            {/* Sticky Forward Banner - appears when quotes are selected */}
+            {isLender && selectedQuotesForForward.length > 0 && (
+              <div style={{
+                position: 'sticky',
+                top: 0,
+                zIndex: 100,
+                padding: theme.spacing.lg,
+                background: theme.colors.primary,
+                color: theme.colors.white,
+                borderRadius: theme.borderRadius.md,
+                marginBottom: theme.spacing.lg,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: theme.spacing.md,
+              }}>
+                <div style={{ flex: 1 }}>
+                  <h3 style={{ margin: `0 0 ${theme.spacing.xs} 0`, color: theme.colors.white, fontSize: theme.typography.fontSize.lg }}>
+                    {selectedQuotesForForward.length} Quote{selectedQuotesForForward.length > 1 ? 's' : ''} Selected
+                  </h3>
+                  <p style={{ margin: 0, color: theme.colors.white, opacity: 0.9, fontSize: theme.typography.fontSize.sm }}>
+                    Ready to forward to borrower for review
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: theme.spacing.sm, flexWrap: 'wrap' }}>
+                  <Button
+                    variant="outline"
+                    onClick={() => setSelectedQuotesForForward([])}
+                    style={{
+                      background: theme.colors.white,
+                      color: theme.colors.primary,
+                      borderColor: theme.colors.white,
+                    }}
+                  >
+                    Clear Selection
+                  </Button>
+                  <Button
+                    variant="success"
+                    onClick={() => setForwardQuotesModal({ open: true, notes: '' })}
+                    style={{
+                      background: theme.colors.success,
+                      color: theme.colors.white,
+                      borderColor: theme.colors.success,
+                      fontWeight: theme.typography.fontWeight.semibold,
+                    }}
+                  >
+                    Forward to Borrower →
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div style={{ ...commonStyles.card, marginBottom: theme.spacing.lg }}>
               <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Quotes</h2>
               <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}>
@@ -686,13 +1021,26 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
                     key={quote.id}
                     style={{
                       padding: theme.spacing.lg,
-                      border: `1px solid ${theme.colors.gray300}`,
+                      border: `1px solid ${selectedQuotesForForward.includes(quote.id) ? theme.colors.primary : theme.colors.gray300}`,
                       borderRadius: theme.borderRadius.md,
-                      background: theme.colors.white,
+                      background: selectedQuotesForForward.includes(quote.id) ? theme.colors.primaryLight : theme.colors.white,
                     }}
                   >
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
-                      <div style={{ flex: 1 }}>
+                      <div style={{ flex: 1, display: 'flex', alignItems: 'start', gap: theme.spacing.sm }}>
+                        <input
+                          type="checkbox"
+                          checked={selectedQuotesForForward.includes(quote.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedQuotesForForward([...selectedQuotesForForward, quote.id]);
+                            } else {
+                              setSelectedQuotesForForward(selectedQuotesForForward.filter(id => id !== quote.id));
+                            }
+                          }}
+                          style={{ marginTop: theme.spacing.xs }}
+                        />
+                        <div style={{ flex: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
                           <h3 style={{ margin: 0, fontSize: theme.typography.fontSize.lg }}>
                             {quote.provider_firm_name}
@@ -709,7 +1057,7 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
                         </p>
                         {quote.scope_summary && (
                           <p style={{ margin: `${theme.spacing.sm} 0`, fontSize: theme.typography.fontSize.sm }}>
-                            {quote.scope_summary}
+                            {quote.scope_summary.substring(0, 150)}{quote.scope_summary.length > 150 ? '...' : ''}
                           </p>
                         )}
                         <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
@@ -730,6 +1078,18 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
                             </span>
                           </div>
                         )}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xs }}>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => {
+                            navigate(`/deals/${dealId}/quotes/${quote.id}`);
+                          }}
+                        >
+                          View Details
+                        </Button>
                       </div>
                     </div>
                   </div>
@@ -796,32 +1156,1191 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
         </div>
       )}
 
-      {/* PROGRESS, DELIVERABLES, APPOINTMENTS, MESSAGES - Placeholders for now */}
+      {/* PROGRESS TAB - Provider Stages and Tasks */}
       {isLender && activeSubTab === 'progress' && (
-        <div style={commonStyles.card}>
-          <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Provider Progress</h2>
-          <p style={{ color: theme.colors.textSecondary }}>Provider progress tracking (Chunk 6)...</p>
+        <div>
+          <div style={commonStyles.card}>
+            <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Provider Progress</h2>
+            {providerStages.length === 0 ? (
+              <p style={{ color: theme.colors.textSecondary, textAlign: 'center', padding: theme.spacing.xl }}>
+                No providers have been selected yet. Select providers in the Selection tab to track their progress.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xl }}>
+                {providerStages.map(stage => {
+                  const roleDisplay = stage.role_type_display || stage.role_type;
+                  const stageDisplay = stage.current_stage_display || stage.current_stage.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+                  const tasks = stage.tasks || [];
+                  const completedTasks = tasks.filter(t => t.status === 'completed').length;
+                  const totalTasks = tasks.length;
+                  const progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+                  
+                  return (
+                    <div key={stage.id} style={{
+                      padding: theme.spacing.lg,
+                      border: `1px solid ${theme.colors.gray300}`,
+                      borderRadius: theme.borderRadius.md,
+                      background: theme.colors.white,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: theme.spacing.md }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
+                            <h3 style={{ margin: 0 }}>{roleDisplay}</h3>
+                            <Badge color={theme.colors.primary}>{stageDisplay}</Badge>
+                            {stage.completed_at && (
+                              <Badge color={theme.colors.success}>Completed</Badge>
+                            )}
+                          </div>
+                          <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                            Provider: {stage.provider_firm_name || stage.provider_firm}
+                          </p>
+                          {stage.stage_entered_at && (
+                            <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Stage entered: {formatDate(stage.stage_entered_at)}
+                            </p>
+                          )}
+                          {totalTasks > 0 && (
+                            <div style={{ marginTop: theme.spacing.sm }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: theme.spacing.xs }}>
+                                <span style={{ fontSize: theme.typography.fontSize.sm }}>Progress</span>
+                                <span style={{ fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                                  {completedTasks} / {totalTasks} tasks
+                                </span>
+                              </div>
+                              <div style={{
+                                width: '100%',
+                                height: 8,
+                                background: theme.colors.gray200,
+                                borderRadius: theme.borderRadius.sm,
+                                overflow: 'hidden',
+                              }}>
+                                <div style={{
+                                  width: `${progressPercent}%`,
+                                  height: '100%',
+                                  background: progressPercent === 100 ? theme.colors.success : theme.colors.primary,
+                                  transition: 'width 0.3s ease',
+                                }} />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {stage.next_stage && !stage.completed_at && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={async () => {
+                              try {
+                                await api.post(`/api/deals/provider-stages/${stage.id}/advance_stage/`);
+                                await loadProviderStages();
+                                await loadParties(); // Refresh to update tasks
+                              } catch (err) {
+                                console.error('Failed to advance stage:', err);
+                                alert('Failed to advance stage: ' + (err.response?.data?.error || err.message));
+                              }
+                            }}
+                          >
+                            Advance to Next Stage
+                          </Button>
+                        )}
+                      </div>
+                      
+                      {/* Tasks */}
+                      {tasks.length > 0 && (
+                        <div style={{ marginTop: theme.spacing.lg }}>
+                          <h4 style={{ margin: `0 0 ${theme.spacing.md} 0`, fontSize: theme.typography.fontSize.lg }}>
+                            Tasks
+                          </h4>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
+                            {tasks.map(task => {
+                              const isOverdue = task.due_date && new Date(task.due_date) < new Date() && task.status !== 'completed';
+                              const priorityColors = {
+                                critical: theme.colors.error,
+                                high: theme.colors.warning,
+                                medium: theme.colors.info,
+                                low: theme.colors.gray500,
+                              };
+                              
+                              return (
+                                <div
+                                  key={task.id}
+                                  style={{
+                                    padding: theme.spacing.md,
+                                    border: `1px solid ${task.status === 'completed' ? theme.colors.success : theme.colors.gray300}`,
+                                    borderRadius: theme.borderRadius.sm,
+                                    background: task.status === 'completed' ? theme.colors.successLight : theme.colors.white,
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                                    <div style={{ flex: 1 }}>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
+                                        <h5 style={{ margin: 0, fontSize: theme.typography.fontSize.md }}>
+                                          {task.title}
+                                        </h5>
+                                        <Badge color={priorityColors[task.priority] || theme.colors.gray500} style={{ fontSize: theme.typography.fontSize.xs }}>
+                                          {task.priority}
+                                        </Badge>
+                                        {task.status === 'completed' && (
+                                          <Badge color={theme.colors.success}>Completed</Badge>
+                                        )}
+                                        {isOverdue && task.status !== 'completed' && (
+                                          <Badge color={theme.colors.error}>Overdue</Badge>
+                                        )}
+                                      </div>
+                                      {task.description && (
+                                        <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                          {task.description}
+                                        </p>
+                                      )}
+                                      <div style={{ display: 'flex', gap: theme.spacing.md, marginTop: theme.spacing.xs }}>
+                                        {task.due_date && (
+                                          <span style={{ fontSize: theme.typography.fontSize.sm, color: isOverdue ? theme.colors.error : theme.colors.textSecondary }}>
+                                            Due: {formatDate(task.due_date)}
+                                          </span>
+                                        )}
+                                        {task.stage && (
+                                          <span style={{ fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                            Stage: {task.stage.name || task.stage}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {task.status !== 'completed' && (
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={async () => {
+                                          try {
+                                            await api.post(`/api/deals/deal-tasks/${task.id}/complete/`);
+                                            await loadProviderStages();
+                                            await loadParties();
+                                          } catch (err) {
+                                            console.error('Failed to complete task:', err);
+                                            alert('Failed to complete task: ' + (err.response?.data?.error || err.message));
+                                          }
+                                        }}
+                                      >
+                                        Mark Complete
+                                      </Button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      {(isLender || isBorrower) && activeSubTab === 'deliverables' && (
-        <div style={commonStyles.card}>
-          <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Deliverables</h2>
-          <p style={{ color: theme.colors.textSecondary }}>Deliverables management (Chunk 7)...</p>
+      {(isLender || isBorrower || isConsultant) && activeSubTab === 'deliverables' && (
+        <div>
+          <div style={commonStyles.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing.lg }}>
+              <h2 style={{ margin: 0 }}>Deliverables</h2>
+              {isConsultant && (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    // Get provider's role from selections
+                    const providerSelection = selections.find(s => s.provider_firm === consultants.find(c => c.user === localStorage.getItem('userId'))?.id);
+                    if (providerSelection) {
+                      setUploadDeliverableModal({ open: true, roleType: providerSelection.role_type, deliverableType: null });
+                    } else {
+                      alert('You must be selected as a provider for this deal to upload deliverables');
+                    }
+                  }}
+                >
+                  Upload Deliverable
+                </Button>
+              )}
+            </div>
+            
+            {deliverables.length === 0 ? (
+              <p style={{ color: theme.colors.textSecondary, textAlign: 'center', padding: theme.spacing.xl }}>
+                No deliverables uploaded yet.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.lg }}>
+                {deliverables.map(deliverable => {
+                  const statusColors = {
+                    uploaded: theme.colors.info,
+                    under_review: theme.colors.warning,
+                    approved: theme.colors.success,
+                    rejected: theme.colors.error,
+                    revised: theme.colors.gray500,
+                  };
+                  
+                  return (
+                    <div key={deliverable.id} style={{
+                      padding: theme.spacing.lg,
+                      border: `1px solid ${theme.colors.gray300}`,
+                      borderRadius: theme.borderRadius.md,
+                      background: theme.colors.white,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: theme.spacing.md }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
+                            <h3 style={{ margin: 0 }}>{deliverable.deliverable_type_display}</h3>
+                            <Badge color={statusColors[deliverable.status] || theme.colors.gray500}>
+                              {deliverable.status_display}
+                            </Badge>
+                            <Badge color={theme.colors.primary}>v{deliverable.version}</Badge>
+                            {deliverable.has_revisions && (
+                              <Badge color={theme.colors.info}>{deliverable.revision_count} revision(s)</Badge>
+                            )}
+                          </div>
+                          <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                            Provider: {deliverable.provider_firm_name} ({deliverable.role_type_display})
+                          </p>
+                          {deliverable.document_name && (
+                            <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Document: {deliverable.document_name} ({(deliverable.document_size / 1024).toFixed(2)} KB)
+                            </p>
+                          )}
+                          <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                            Uploaded: {formatDate(deliverable.uploaded_at)} by {deliverable.uploaded_by_name}
+                          </p>
+                          {deliverable.reviewed_at && (
+                            <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Reviewed: {formatDate(deliverable.reviewed_at)} by {deliverable.reviewed_by_name}
+                            </p>
+                          )}
+                          {deliverable.review_notes && (
+                            <div style={{
+                              marginTop: theme.spacing.sm,
+                              padding: theme.spacing.md,
+                              background: theme.colors.gray100,
+                              borderRadius: theme.borderRadius.sm,
+                            }}>
+                              <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                                Review Notes:
+                              </p>
+                              <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm }}>
+                                {deliverable.review_notes}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xs }}>
+                          {deliverable.document_url && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => window.open(deliverable.document_url, '_blank')}
+                            >
+                              Download
+                            </Button>
+                          )}
+                          {isLender && deliverable.status === 'uploaded' && (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => setReviewDeliverableModal({ open: true, deliverable })}
+                            >
+                              Review
+                            </Button>
+                          )}
+                          {isConsultant && (deliverable.status === 'rejected' || deliverable.status === 'under_review') && (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => setUploadDeliverableModal({ 
+                                open: true, 
+                                roleType: deliverable.role_type, 
+                                deliverableType: deliverable.deliverable_type 
+                              })}
+                            >
+                              Upload Revision
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          
+          {/* Upload Deliverable Modal */}
+          {uploadDeliverableModal.open && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}>
+              <div style={{
+                background: theme.colors.white,
+                padding: theme.spacing.xl,
+                borderRadius: theme.borderRadius.md,
+                maxWidth: 600,
+                width: '90%',
+                maxHeight: '90vh',
+                overflow: 'auto',
+              }}>
+                <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Upload Deliverable</h2>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target);
+                  const file = formData.get('file');
+                  
+                  if (!file) {
+                    alert('Please select a file');
+                    return;
+                  }
+                  
+                  try {
+                    const uploadData = new FormData();
+                    uploadData.append('file', file);
+                    uploadData.append('deal', dealId);
+                    uploadData.append('role_type', uploadDeliverableModal.roleType);
+                    uploadData.append('deliverable_type', formData.get('deliverable_type'));
+                    
+                    await api.post('/api/deals/provider-deliverables/', uploadData, {
+                      headers: { 'Content-Type': 'multipart/form-data' },
+                    });
+                    
+                    await loadDeliverables();
+                    setUploadDeliverableModal({ open: false, deliverableType: null, roleType: null });
+                    alert('Deliverable uploaded successfully');
+                  } catch (err) {
+                    console.error('Failed to upload deliverable:', err);
+                    alert('Failed to upload deliverable: ' + (err.response?.data?.error || err.message));
+                  }
+                }}>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Deliverable Type
+                    </label>
+                    <Select
+                      name="deliverable_type"
+                      required
+                      defaultValue={uploadDeliverableModal.deliverableType || ''}
+                      options={[
+                        { value: 'valuation_report', label: 'Valuation Report' },
+                        { value: 'reliance_letter', label: 'Reliance Letter' },
+                        { value: 'ims_initial_report', label: 'IMS Initial Report' },
+                        { value: 'monitoring_report', label: 'Monitoring Report' },
+                        { value: 'drawdown_certificate', label: 'Drawdown Certificate' },
+                        { value: 'legal_doc_pack', label: 'Legal Document Pack' },
+                        { value: 'cp_evidence', label: 'CP Evidence' },
+                        { value: 'completion_statement', label: 'Completion Statement' },
+                      ]}
+                    />
+                  </div>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      File
+                    </label>
+                    <input type="file" name="file" required style={{ width: '100%' }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setUploadDeliverableModal({ open: false, deliverableType: null, roleType: null })}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" variant="primary">
+                      Upload
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+          
+          {/* Review Deliverable Modal */}
+          {reviewDeliverableModal.open && reviewDeliverableModal.deliverable && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}>
+              <div style={{
+                background: theme.colors.white,
+                padding: theme.spacing.xl,
+                borderRadius: theme.borderRadius.md,
+                maxWidth: 600,
+                width: '90%',
+                maxHeight: '90vh',
+                overflow: 'auto',
+              }}>
+                <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Review Deliverable</h2>
+                <p style={{ margin: `0 0 ${theme.spacing.md} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                  {reviewDeliverableModal.deliverable.deliverable_type_display} v{reviewDeliverableModal.deliverable.version}
+                </p>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target);
+                  const action = formData.get('action');
+                  const reviewNotes = formData.get('review_notes');
+                  
+                  try {
+                    await api.post(`/api/deals/provider-deliverables/${reviewDeliverableModal.deliverable.id}/review/`, {
+                      action,
+                      review_notes: reviewNotes,
+                    });
+                    
+                    await loadDeliverables();
+                    setReviewDeliverableModal({ open: false, deliverable: null });
+                    alert('Review submitted successfully');
+                  } catch (err) {
+                    console.error('Failed to review deliverable:', err);
+                    alert('Failed to submit review: ' + (err.response?.data?.error || err.message));
+                  }
+                }}>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Action
+                    </label>
+                    <Select
+                      name="action"
+                      required
+                      options={[
+                        { value: 'approve', label: 'Approve' },
+                        { value: 'reject', label: 'Reject' },
+                        { value: 'request_revision', label: 'Request Revision' },
+                      ]}
+                    />
+                  </div>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Review Notes
+                    </label>
+                    <Textarea
+                      name="review_notes"
+                      rows={5}
+                      placeholder="Enter review comments..."
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setReviewDeliverableModal({ open: false, deliverable: null })}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" variant="primary">
+                      Submit Review
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {(isLender || isBorrower) && activeSubTab === 'appointments' && (
-        <div style={commonStyles.card}>
-          <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Appointments</h2>
-          <p style={{ color: theme.colors.textSecondary }}>Appointment booking (Chunk 8)...</p>
+      {(isLender || isBorrower || isConsultant) && activeSubTab === 'appointments' && (
+        <div>
+          <div style={commonStyles.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing.lg }}>
+              <h2 style={{ margin: 0 }}>Appointments</h2>
+              {(isBorrower || isConsultant) && selections.length > 0 && (
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    // Get first selected provider for booking
+                    const firstSelection = selections[0];
+                    setBookAppointmentModal({ 
+                      open: true, 
+                      roleType: firstSelection.role_type, 
+                      providerFirm: firstSelection.provider_firm 
+                    });
+                  }}
+                >
+                  Book Appointment
+                </Button>
+              )}
+            </div>
+            
+            {appointments.length === 0 ? (
+              <p style={{ color: theme.colors.textSecondary, textAlign: 'center', padding: theme.spacing.xl }}>
+                No appointments scheduled yet.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.lg }}>
+                {appointments.map(appointment => {
+                  const statusColors = {
+                    proposed: theme.colors.info,
+                    confirmed: theme.colors.success,
+                    rescheduled: theme.colors.warning,
+                    cancelled: theme.colors.error,
+                    completed: theme.colors.gray500,
+                  };
+                  
+                  return (
+                    <div key={appointment.id} style={{
+                      padding: theme.spacing.lg,
+                      border: `1px solid ${theme.colors.gray300}`,
+                      borderRadius: theme.borderRadius.md,
+                      background: theme.colors.white,
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: theme.spacing.md }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
+                            <h3 style={{ margin: 0 }}>{appointment.role_type_display}</h3>
+                            <Badge color={statusColors[appointment.status] || theme.colors.gray500}>
+                              {appointment.status_display}
+                            </Badge>
+                          </div>
+                          <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                            Provider: {appointment.provider_firm_name}
+                          </p>
+                          {appointment.date_time && (
+                            <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Date & Time: {new Date(appointment.date_time).toLocaleString()}
+                            </p>
+                          )}
+                          {appointment.location && (
+                            <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Location: {appointment.location}
+                            </p>
+                          )}
+                          {appointment.notes && (
+                            <div style={{
+                              marginTop: theme.spacing.sm,
+                              padding: theme.spacing.md,
+                              background: theme.colors.gray100,
+                              borderRadius: theme.borderRadius.sm,
+                            }}>
+                              <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm }}>
+                                {appointment.notes}
+                              </p>
+                            </div>
+                          )}
+                          {appointment.proposed_slots && appointment.proposed_slots.length > 0 && appointment.status === 'proposed' && (
+                            <div style={{ marginTop: theme.spacing.sm }}>
+                              <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                                Proposed Time Slots:
+                              </p>
+                              {appointment.proposed_slots.map((slot, idx) => (
+                                <div key={idx} style={{
+                                  padding: theme.spacing.sm,
+                                  marginTop: theme.spacing.xs,
+                                  border: `1px solid ${theme.colors.gray300}`,
+                                  borderRadius: theme.borderRadius.sm,
+                                }}>
+                                  <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm }}>
+                                    {new Date(slot.date_time).toLocaleString()}
+                                  </p>
+                                  {slot.notes && (
+                                    <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                      {slot.notes}
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {appointment.proposed_by_name && (
+                            <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Proposed by: {appointment.proposed_by_name}
+                            </p>
+                          )}
+                          {appointment.confirmed_by_name && (
+                            <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Confirmed by: {appointment.confirmed_by_name} on {formatDate(appointment.confirmed_at)}
+                            </p>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xs }}>
+                          {appointment.can_confirm && (
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={() => setAppointmentActionModal({ open: true, appointment, action: 'confirm' })}
+                            >
+                              Confirm
+                            </Button>
+                          )}
+                          {appointment.can_reschedule && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setAppointmentActionModal({ open: true, appointment, action: 'reschedule' })}
+                            >
+                              Reschedule
+                            </Button>
+                          )}
+                          {appointment.can_cancel && (
+                            <Button
+                              variant="error"
+                              size="sm"
+                              onClick={() => setAppointmentActionModal({ open: true, appointment, action: 'cancel' })}
+                            >
+                              Cancel
+                            </Button>
+                          )}
+                          {appointment.can_complete && (
+                            <Button
+                              variant="success"
+                              size="sm"
+                              onClick={() => setAppointmentActionModal({ open: true, appointment, action: 'complete' })}
+                            >
+                              Mark Complete
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          
+          {/* Book Appointment Modal */}
+          {bookAppointmentModal.open && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}>
+              <div style={{
+                background: theme.colors.white,
+                padding: theme.spacing.xl,
+                borderRadius: theme.borderRadius.md,
+                maxWidth: 600,
+                width: '90%',
+                maxHeight: '90vh',
+                overflow: 'auto',
+              }}>
+                <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Book Appointment</h2>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target);
+                  const dateTime = formData.get('date_time');
+                  const location = formData.get('location');
+                  const notes = formData.get('notes');
+                  
+                  try {
+                    await api.post('/api/deals/provider-appointments/', {
+                      deal: dealId,
+                      role_type: bookAppointmentModal.roleType,
+                      provider_firm: bookAppointmentModal.providerFirm,
+                      date_time: dateTime,
+                      location: location,
+                      notes: notes,
+                    });
+                    
+                    await loadAppointments();
+                    setBookAppointmentModal({ open: false, roleType: null, providerFirm: null });
+                    alert('Appointment booked successfully');
+                  } catch (err) {
+                    console.error('Failed to book appointment:', err);
+                    alert('Failed to book appointment: ' + (err.response?.data?.error || err.message));
+                  }
+                }}>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Date & Time *
+                    </label>
+                    <Input
+                      type="datetime-local"
+                      name="date_time"
+                      required
+                    />
+                  </div>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Location
+                    </label>
+                    <Input
+                      type="text"
+                      name="location"
+                      placeholder="Appointment location/address"
+                    />
+                  </div>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Notes
+                    </label>
+                    <Textarea
+                      name="notes"
+                      rows={4}
+                      placeholder="Appointment notes/agenda..."
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setBookAppointmentModal({ open: false, roleType: null, providerFirm: null })}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" variant="primary">
+                      Book Appointment
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+          
+          {/* Appointment Action Modal (Confirm/Reschedule/Cancel/Complete) */}
+          {appointmentActionModal.open && appointmentActionModal.appointment && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}>
+              <div style={{
+                background: theme.colors.white,
+                padding: theme.spacing.xl,
+                borderRadius: theme.borderRadius.md,
+                maxWidth: 600,
+                width: '90%',
+                maxHeight: '90vh',
+                overflow: 'auto',
+              }}>
+                <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>
+                  {appointmentActionModal.action === 'confirm' ? 'Confirm Appointment' :
+                   appointmentActionModal.action === 'reschedule' ? 'Reschedule Appointment' :
+                   appointmentActionModal.action === 'cancel' ? 'Cancel Appointment' :
+                   'Mark as Completed'}
+                </h2>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target);
+                  const appointment = appointmentActionModal.appointment;
+                  
+                  try {
+                    let endpoint = '';
+                    let data = {};
+                    
+                    if (appointmentActionModal.action === 'confirm') {
+                      endpoint = `/api/deals/provider-appointments/${appointment.id}/confirm/`;
+                      const selectedSlot = formData.get('selected_slot');
+                      data = {
+                        selected_slot: selectedSlot ? parseInt(selectedSlot) : appointment.proposed_slots?.[0] ? 0 : null,
+                        location: formData.get('location') || appointment.location,
+                        notes: formData.get('notes') || '',
+                      };
+                    } else if (appointmentActionModal.action === 'reschedule') {
+                      endpoint = `/api/deals/provider-appointments/${appointment.id}/reschedule/`;
+                      data = {
+                        date_time: formData.get('date_time'),
+                        location: formData.get('location') || appointment.location,
+                        notes: formData.get('notes') || '',
+                      };
+                    } else if (appointmentActionModal.action === 'cancel') {
+                      endpoint = `/api/deals/provider-appointments/${appointment.id}/cancel/`;
+                      data = { reason: formData.get('reason') || '' };
+                    } else if (appointmentActionModal.action === 'complete') {
+                      endpoint = `/api/deals/provider-appointments/${appointment.id}/complete/`;
+                      data = { notes: formData.get('notes') || '' };
+                    }
+                    
+                    await api.post(endpoint, data);
+                    await loadAppointments();
+                    setAppointmentActionModal({ open: false, appointment: null, action: null });
+                    alert('Appointment updated successfully');
+                  } catch (err) {
+                    console.error('Failed to update appointment:', err);
+                    alert('Failed to update appointment: ' + (err.response?.data?.error || err.message));
+                  }
+                }}>
+                  {appointmentActionModal.action === 'confirm' && appointmentActionModal.appointment.proposed_slots && appointmentActionModal.appointment.proposed_slots.length > 0 && (
+                    <div style={{ marginBottom: theme.spacing.md }}>
+                      <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                        Select Time Slot *
+                      </label>
+                      <Select
+                        name="selected_slot"
+                        required
+                        options={appointmentActionModal.appointment.proposed_slots.map((slot, idx) => ({
+                          value: idx.toString(),
+                          label: `${new Date(slot.date_time).toLocaleString()}${slot.notes ? ' - ' + slot.notes : ''}`,
+                        }))}
+                      />
+                    </div>
+                  )}
+                  {appointmentActionModal.action === 'reschedule' && (
+                    <div style={{ marginBottom: theme.spacing.md }}>
+                      <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                        New Date & Time *
+                      </label>
+                      <Input
+                        type="datetime-local"
+                        name="date_time"
+                        required
+                        defaultValue={appointmentActionModal.appointment.date_time ? new Date(appointmentActionModal.appointment.date_time).toISOString().slice(0, 16) : ''}
+                      />
+                    </div>
+                  )}
+                  {(appointmentActionModal.action === 'confirm' || appointmentActionModal.action === 'reschedule') && (
+                    <>
+                      <div style={{ marginBottom: theme.spacing.md }}>
+                        <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                          Location
+                        </label>
+                        <Input
+                          type="text"
+                          name="location"
+                          defaultValue={appointmentActionModal.appointment.location || ''}
+                          placeholder="Appointment location/address"
+                        />
+                      </div>
+                      <div style={{ marginBottom: theme.spacing.md }}>
+                        <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                          Notes
+                        </label>
+                        <Textarea
+                          name="notes"
+                          rows={4}
+                          placeholder="Additional notes..."
+                        />
+                      </div>
+                    </>
+                  )}
+                  {appointmentActionModal.action === 'cancel' && (
+                    <div style={{ marginBottom: theme.spacing.md }}>
+                      <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                        Reason (optional)
+                      </label>
+                      <Textarea
+                        name="reason"
+                        rows={4}
+                        placeholder="Reason for cancellation..."
+                      />
+                    </div>
+                  )}
+                  {appointmentActionModal.action === 'complete' && (
+                    <div style={{ marginBottom: theme.spacing.md }}>
+                      <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                        Completion Notes (optional)
+                      </label>
+                      <Textarea
+                        name="notes"
+                        rows={4}
+                        placeholder="Completion notes..."
+                      />
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setAppointmentActionModal({ open: false, appointment: null, action: null })}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" variant="primary">
+                      {appointmentActionModal.action === 'confirm' ? 'Confirm' :
+                       appointmentActionModal.action === 'reschedule' ? 'Reschedule' :
+                       appointmentActionModal.action === 'cancel' ? 'Cancel Appointment' :
+                       'Mark Complete'}
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {(isLender || isBorrower) && activeSubTab === 'messages' && (
-        <div style={commonStyles.card}>
-          <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Messages</h2>
-          <p style={{ color: theme.colors.textSecondary }}>Private messages (Chunk 9)...</p>
+      {(isLender || isBorrower || isConsultant) && activeSubTab === 'messages' && (
+        <div>
+          <div style={{ display: 'flex', gap: theme.spacing.lg, height: '600px' }}>
+            {/* Thread List */}
+            <div style={{ 
+              width: '300px', 
+              border: `1px solid ${theme.colors.gray300}`, 
+              borderRadius: theme.borderRadius.md,
+              background: theme.colors.white,
+              display: 'flex',
+              flexDirection: 'column',
+            }}>
+              <div style={{ 
+                padding: theme.spacing.md, 
+                borderBottom: `1px solid ${theme.colors.gray300}`,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}>
+                <h3 style={{ margin: 0 }}>Threads</h3>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={() => setCreateThreadModal({ open: true })}
+                >
+                  New Thread
+                </Button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {messageThreads.length === 0 ? (
+                  <div style={{ padding: theme.spacing.lg, textAlign: 'center', color: theme.colors.textSecondary }}>
+                    No message threads yet. Create one to start communicating.
+                  </div>
+                ) : (
+                  messageThreads.map(thread => (
+                    <div
+                      key={thread.id}
+                      onClick={() => setSelectedThread(thread)}
+                      style={{
+                        padding: theme.spacing.md,
+                        borderBottom: `1px solid ${theme.colors.gray300}`,
+                        cursor: 'pointer',
+                        background: selectedThread?.id === thread.id ? theme.colors.primaryLight : 'transparent',
+                        ':hover': { background: theme.colors.gray50 },
+                      }}
+                      onMouseEnter={(e) => {
+                        if (selectedThread?.id !== thread.id) {
+                          e.currentTarget.style.background = theme.colors.gray50;
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selectedThread?.id !== thread.id) {
+                          e.currentTarget.style.background = 'transparent';
+                        }
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: theme.spacing.xs }}>
+                        <Badge color={theme.colors.primary} style={{ fontSize: theme.typography.fontSize.xs }}>
+                          {thread.thread_type_display}
+                        </Badge>
+                        {thread.is_private && (
+                          <Badge color={theme.colors.warning} style={{ fontSize: theme.typography.fontSize.xs }}>
+                            Private
+                          </Badge>
+                        )}
+                      </div>
+                      <h4 style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.md }}>
+                        {thread.subject || `Thread ${thread.id}`}
+                      </h4>
+                      {thread.visible_to_party_names && thread.visible_to_party_names.length > 0 && (
+                        <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                          {thread.visible_to_party_names.join(', ')}
+                        </p>
+                      )}
+                      {thread.last_message_at && (
+                        <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.xs, color: theme.colors.textSecondary }}>
+                          {new Date(thread.last_message_at).toLocaleString()}
+                        </p>
+                      )}
+                      {thread.message_count > 0 && (
+                        <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.xs, color: theme.colors.textSecondary }}>
+                          {thread.message_count} message{thread.message_count !== 1 ? 's' : ''}
+                        </p>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Message View */}
+            <div style={{ 
+              flex: 1, 
+              border: `1px solid ${theme.colors.gray300}`, 
+              borderRadius: theme.borderRadius.md,
+              background: theme.colors.white,
+              display: 'flex',
+              flexDirection: 'column',
+            }}>
+              {selectedThread ? (
+                <>
+                  <div style={{ 
+                    padding: theme.spacing.md, 
+                    borderBottom: `1px solid ${theme.colors.gray300}`,
+                  }}>
+                    <h3 style={{ margin: 0 }}>{selectedThread.subject || `Thread ${selectedThread.id}`}</h3>
+                    <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      {selectedThread.thread_type_display}
+                      {selectedThread.visible_to_party_names && ` • ${selectedThread.visible_to_party_names.join(', ')}`}
+                    </p>
+                  </div>
+                  <div style={{ 
+                    flex: 1, 
+                    overflowY: 'auto', 
+                    padding: theme.spacing.md,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: theme.spacing.sm,
+                  }}>
+                    {threadMessages.length === 0 ? (
+                      <div style={{ textAlign: 'center', color: theme.colors.textSecondary, padding: theme.spacing.xl }}>
+                        No messages yet. Start the conversation!
+                      </div>
+                    ) : (
+                      threadMessages.map(msg => (
+                        <div
+                          key={msg.id}
+                          style={{
+                            alignSelf: msg.is_own_message ? 'flex-end' : 'flex-start',
+                            maxWidth: '70%',
+                            padding: theme.spacing.md,
+                            background: msg.is_own_message ? theme.colors.primary : theme.colors.gray100,
+                            color: msg.is_own_message ? theme.colors.white : theme.colors.text,
+                            borderRadius: theme.borderRadius.md,
+                          }}
+                        >
+                          <div style={{ 
+                            marginBottom: theme.spacing.xs, 
+                            fontSize: theme.typography.fontSize.sm,
+                            opacity: 0.8,
+                          }}>
+                            {msg.sender_name} {msg.sender_role && `(${msg.sender_role})`}
+                          </div>
+                          <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{msg.message}</p>
+                          <div style={{ 
+                            marginTop: theme.spacing.xs, 
+                            fontSize: theme.typography.fontSize.xs,
+                            opacity: 0.7,
+                          }}>
+                            {new Date(msg.created_at).toLocaleString()}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div style={{ 
+                    padding: theme.spacing.md, 
+                    borderTop: `1px solid ${theme.colors.gray300}`,
+                  }}>
+                    <form onSubmit={(e) => {
+                      e.preventDefault();
+                      sendMessage(selectedThread.id);
+                    }}>
+                      <div style={{ display: 'flex', gap: theme.spacing.sm }}>
+                        <Textarea
+                          value={newMessageText}
+                          onChange={(e) => setNewMessageText(e.target.value)}
+                          placeholder="Type your message..."
+                          rows={3}
+                          style={{ flex: 1 }}
+                        />
+                        <Button type="submit" variant="primary" style={{ alignSelf: 'flex-end' }}>
+                          Send
+                        </Button>
+                      </div>
+                    </form>
+                  </div>
+                </>
+              ) : (
+                <div style={{ 
+                  flex: 1, 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  color: theme.colors.textSecondary,
+                }}>
+                  Select a thread to view messages
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Create Thread Modal */}
+          {createThreadModal.open && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              background: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+            }}>
+              <div style={{
+                background: theme.colors.white,
+                padding: theme.spacing.xl,
+                borderRadius: theme.borderRadius.md,
+                maxWidth: 500,
+                width: '90%',
+              }}>
+                <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Create New Thread</h2>
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target);
+                  const threadType = formData.get('thread_type');
+                  const subject = formData.get('subject');
+                  await createThread(threadType, subject);
+                }}>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Thread Type *
+                    </label>
+                    <Select
+                      name="thread_type"
+                      required
+                      options={[
+                        { value: 'general', label: 'General (Borrower-Lender)' },
+                        { value: 'legal', label: 'Legal (Lender + Solicitors)' },
+                        { value: 'valuation', label: 'Valuation (Lender + Valuer)' },
+                        { value: 'ims', label: 'IMS (Lender + Monitoring Surveyor)' },
+                      ]}
+                    />
+                  </div>
+                  <div style={{ marginBottom: theme.spacing.md }}>
+                    <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Subject *
+                    </label>
+                    <Input
+                      type="text"
+                      name="subject"
+                      required
+                      placeholder="Thread subject..."
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setCreateThreadModal({ open: false })}
+                    >
+                      Cancel
+                    </Button>
+                    <Button type="submit" variant="primary">
+                      Create Thread
+                    </Button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1379,6 +2898,136 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
         </div>
       )}
 
+      {/* REPORTING TAB - Provider Performance Metrics */}
+      {isLender && activeSubTab === 'reporting' && (
+        <div>
+          <div style={commonStyles.card}>
+            <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Provider Performance Metrics</h2>
+            {loadingMetrics ? (
+              <p style={{ textAlign: 'center', padding: theme.spacing.xl, color: theme.colors.textSecondary }}>
+                Loading metrics...
+              </p>
+            ) : providerMetrics && providerMetrics.metrics_by_provider && Object.keys(providerMetrics.metrics_by_provider).length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xl }}>
+                {Object.values(providerMetrics.metrics_by_provider).map((providerData, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      padding: theme.spacing.lg,
+                      border: `1px solid ${theme.colors.gray300}`,
+                      borderRadius: theme.borderRadius.md,
+                      background: theme.colors.white,
+                    }}
+                  >
+                    <div style={{ marginBottom: theme.spacing.md }}>
+                      <h3 style={{ margin: 0, fontSize: theme.typography.fontSize.xl }}>
+                        {providerData.provider_firm?.name || 'Unknown Provider'}
+                      </h3>
+                      <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                        {providerData.role_type_display || providerData.role_type}
+                      </p>
+                    </div>
+
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                      gap: theme.spacing.md,
+                    }}>
+                      {/* Quote Response Time */}
+                      {providerData.quote_response_time_hours !== null && providerData.quote_response_time_hours !== undefined && (
+                        <div style={{ padding: theme.spacing.md, background: theme.colors.gray50, borderRadius: theme.borderRadius.sm }}>
+                          <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                            Quote Response Time
+                          </p>
+                          <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.semibold }}>
+                            {providerData.quote_response_time_hours < 24
+                              ? `${Math.round(providerData.quote_response_time_hours)} hours`
+                              : `${Math.round(providerData.quote_response_time_hours / 24)} days`}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Quote Acceptance */}
+                      {providerData.quote_submitted !== undefined && (
+                        <div style={{ padding: theme.spacing.md, background: theme.colors.gray50, borderRadius: theme.borderRadius.sm }}>
+                          <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                            Quote Status
+                          </p>
+                          <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.semibold }}>
+                            {providerData.quote_accepted ? 'Accepted' : providerData.quote_submitted ? 'Submitted' : 'Not Submitted'}
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Deliverable Metrics */}
+                      {providerData.deliverables_total !== undefined && (
+                        <>
+                          <div style={{ padding: theme.spacing.md, background: theme.colors.gray50, borderRadius: theme.borderRadius.sm }}>
+                            <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Deliverables
+                            </p>
+                            <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.semibold }}>
+                              {providerData.deliverables_approved || 0} / {providerData.deliverables_total || 0} Approved
+                            </p>
+                            {providerData.deliverables_rejected > 0 && (
+                              <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.error }}>
+                                {providerData.deliverables_rejected} Rejected
+                              </p>
+                            )}
+                          </div>
+
+                          {providerData.average_delivery_time_days !== null && providerData.average_delivery_time_days !== undefined && (
+                            <div style={{ padding: theme.spacing.md, background: theme.colors.gray50, borderRadius: theme.borderRadius.sm }}>
+                              <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                Avg. Delivery Time
+                              </p>
+                              <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.semibold }}>
+                                {Math.round(providerData.average_delivery_time_days)} days
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {/* Appointment Metrics */}
+                      {providerData.appointments_total !== undefined && (
+                        <>
+                          <div style={{ padding: theme.spacing.md, background: theme.colors.gray50, borderRadius: theme.borderRadius.sm }}>
+                            <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                              Appointments
+                            </p>
+                            <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.semibold }}>
+                              {providerData.appointments_confirmed || 0} / {providerData.appointments_total || 0} Confirmed
+                            </p>
+                          </div>
+
+                          {providerData.average_appointment_lead_time_hours !== null && providerData.average_appointment_lead_time_hours !== undefined && (
+                            <div style={{ padding: theme.spacing.md, background: theme.colors.gray50, borderRadius: theme.borderRadius.sm }}>
+                              <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                Avg. Appointment Lead Time
+                              </p>
+                              <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.lg, fontWeight: theme.typography.fontWeight.semibold }}>
+                                {providerData.average_appointment_lead_time_hours < 24
+                                  ? `${Math.round(providerData.average_appointment_lead_time_hours)} hours`
+                                  : `${Math.round(providerData.average_appointment_lead_time_hours / 24)} days`}
+                              </p>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ textAlign: 'center', padding: theme.spacing.xl, color: theme.colors.textSecondary }}>
+                No provider metrics available for this deal. Metrics will appear once providers are selected and start working on the deal.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* SLA Metrics Placeholder */}
       {subTabs.length === 0 && (
         <div style={commonStyles.card}>
@@ -1387,6 +3036,539 @@ function ConsultantsTab({ dealId, deal, onUpdate }) {
             SLA metrics (time to accept instruction, time to deliver deliverable) will be displayed here.
             Metrics are calculated based on appointment dates and task completions.
           </p>
+        </div>
+      )}
+
+      {/* ENQUIRY DETAIL MODAL */}
+      {enquiryDetailModal.open && enquiryDetailModal.enquiry && (
+        <div style={commonStyles.modalBackdrop}>
+          <div style={{ ...commonStyles.modalContent, maxWidth: '900px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing.lg }}>
+              <h2 style={{ margin: 0 }}>Quote Request Details</h2>
+              <Button variant="outline" onClick={() => setEnquiryDetailModal({ open: false, enquiry: null })}>Close</Button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.lg }}>
+              {/* Enquiry Info */}
+              <div style={commonStyles.card}>
+                <h3 style={{ margin: `0 0 ${theme.spacing.md} 0` }}>Enquiry Information</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: theme.spacing.md }}>
+                  <div>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Provider:</strong> {enquiryDetailModal.enquiry.provider_firm_name}
+                    </p>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Role:</strong> {enquiryDetailModal.enquiry.role_type_display}
+                    </p>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Status:</strong> {getStatusBadge(enquiryDetailModal.enquiry.status)}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Sent:</strong> {formatDate(enquiryDetailModal.enquiry.sent_at)}
+                    </p>
+                    {enquiryDetailModal.enquiry.viewed_at && (
+                      <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                        <strong>Viewed:</strong> {formatDate(enquiryDetailModal.enquiry.viewed_at)}
+                      </p>
+                    )}
+                    {enquiryDetailModal.enquiry.quote_due_at && (
+                      <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                        <strong>Quote Due:</strong> {formatDate(enquiryDetailModal.enquiry.quote_due_at)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {enquiryDetailModal.enquiry.acknowledged_at && (
+                  <div style={{
+                    marginTop: theme.spacing.md,
+                    padding: theme.spacing.md,
+                    background: theme.colors.successLight,
+                    borderRadius: theme.borderRadius.sm,
+                    border: `1px solid ${theme.colors.success}`,
+                  }}>
+                    <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold, color: theme.colors.successDark }}>
+                      ✓ Acknowledged: {formatDate(enquiryDetailModal.enquiry.acknowledged_at)}
+                    </p>
+                    {enquiryDetailModal.enquiry.expected_quote_date && (
+                      <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.successDark }}>
+                        Expected Quote: {formatDate(enquiryDetailModal.enquiry.expected_quote_date)}
+                      </p>
+                    )}
+                    {enquiryDetailModal.enquiry.acknowledgment_notes && (
+                      <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary, fontStyle: 'italic' }}>
+                        {enquiryDetailModal.enquiry.acknowledgment_notes}
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {enquiryDetailModal.enquiry.lender_notes && (
+                  <div style={{ marginTop: theme.spacing.md }}>
+                    <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Your Notes:
+                    </p>
+                    <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, whiteSpace: 'pre-wrap' }}>
+                      {enquiryDetailModal.enquiry.lender_notes}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Messages Section */}
+              <div style={commonStyles.card}>
+                <h3 style={{ margin: `0 0 ${theme.spacing.md} 0` }}>Correspondence</h3>
+                {loadingMessages ? (
+                  <p style={{ textAlign: 'center', color: theme.colors.textSecondary }}>Loading messages...</p>
+                ) : selectedThread && threadMessages.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md, maxHeight: '400px', overflowY: 'auto' }}>
+                    {threadMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        style={{
+                          padding: theme.spacing.md,
+                          background: msg.is_own_message ? theme.colors.primaryLight : theme.colors.gray50,
+                          borderRadius: theme.borderRadius.sm,
+                          alignSelf: msg.is_own_message ? 'flex-end' : 'flex-start',
+                          maxWidth: '80%',
+                        }}
+                      >
+                        <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.xs, color: theme.colors.textSecondary }}>
+                          {msg.sender_name} - {formatDate(msg.created_at)}
+                        </p>
+                        <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, whiteSpace: 'pre-wrap' }}>
+                          {msg.message}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: theme.colors.textSecondary, textAlign: 'center', padding: theme.spacing.lg }}>
+                    No messages yet. Start a conversation with the provider.
+                  </p>
+                )}
+
+                {selectedThread && (
+                  <div style={{ marginTop: theme.spacing.md, display: 'flex', gap: theme.spacing.sm }}>
+                    <Textarea
+                      value={newMessageText}
+                      onChange={(e) => setNewMessageText(e.target.value)}
+                      placeholder="Type your message..."
+                      rows={3}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        sendMessage(selectedThread.id);
+                        setNewMessageText('');
+                      }}
+                      disabled={!newMessageText.trim()}
+                    >
+                      Send
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QUOTE DETAIL MODAL */}
+      {quoteDetailModal.open && quoteDetailModal.quote && (
+        <div style={commonStyles.modalBackdrop}>
+          <div style={{ ...commonStyles.modalContent, maxWidth: '1000px', maxHeight: '90vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing.lg }}>
+              <h2 style={{ margin: 0 }}>Quote Details</h2>
+              <Button variant="outline" onClick={() => setQuoteDetailModal({ open: false, quote: null })}>Close</Button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.lg }}>
+              {/* Quote Information */}
+              <div style={commonStyles.card}>
+                <h3 style={{ margin: `0 0 ${theme.spacing.md} 0` }}>Quote Information</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: theme.spacing.md }}>
+                  <div>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Provider:</strong> {quoteDetailModal.quote.provider_firm_name}
+                    </p>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Role:</strong> {quoteDetailModal.quote.role_type_display}
+                    </p>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Status:</strong> {getStatusBadge(quoteDetailModal.quote.status)}
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Price:</strong> £{parseFloat(quoteDetailModal.quote.price_gbp).toLocaleString()}
+                    </p>
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Lead Time:</strong> {quoteDetailModal.quote.lead_time_days} days
+                    </p>
+                    {quoteDetailModal.quote.earliest_available_date && (
+                      <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                        <strong>Available:</strong> {formatDate(quoteDetailModal.quote.earliest_available_date)}
+                      </p>
+                    )}
+                    <p style={{ margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                      <strong>Submitted:</strong> {formatDate(quoteDetailModal.quote.submitted_at)}
+                    </p>
+                  </div>
+                </div>
+
+                {quoteDetailModal.quote.scope_summary && (
+                  <div style={{ marginTop: theme.spacing.md }}>
+                    <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Scope Summary:
+                    </p>
+                    <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, whiteSpace: 'pre-wrap' }}>
+                      {quoteDetailModal.quote.scope_summary}
+                    </p>
+                  </div>
+                )}
+
+                {quoteDetailModal.quote.assumptions && (
+                  <div style={{ marginTop: theme.spacing.md }}>
+                    <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Assumptions & Exclusions:
+                    </p>
+                    <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, whiteSpace: 'pre-wrap' }}>
+                      {quoteDetailModal.quote.assumptions}
+                    </p>
+                  </div>
+                )}
+
+                {quoteDetailModal.quote.deliverables && Array.isArray(quoteDetailModal.quote.deliverables) && quoteDetailModal.quote.deliverables.length > 0 && (
+                  <div style={{ marginTop: theme.spacing.md }}>
+                    <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Deliverables:
+                    </p>
+                    <ul style={{ margin: 0, paddingLeft: theme.spacing.lg, fontSize: theme.typography.fontSize.sm }}>
+                      {quoteDetailModal.quote.deliverables.map((deliverable, idx) => (
+                        <li key={idx}>{deliverable}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {quoteDetailModal.quote.payment_terms && (
+                  <div style={{ marginTop: theme.spacing.md }}>
+                    <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Payment Terms:
+                    </p>
+                    <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, whiteSpace: 'pre-wrap' }}>
+                      {quoteDetailModal.quote.payment_terms}
+                    </p>
+                  </div>
+                )}
+
+                {quoteDetailModal.quote.validity_days && (
+                  <p style={{ margin: `${theme.spacing.md} 0 0 0`, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                    <strong>Validity:</strong> {quoteDetailModal.quote.validity_days} days
+                  </p>
+                )}
+
+                {quoteDetailModal.quote.lender_notes && (
+                  <div style={{ marginTop: theme.spacing.md, padding: theme.spacing.md, background: theme.colors.infoLight, borderRadius: theme.borderRadius.sm }}>
+                    <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                      Your Notes:
+                    </p>
+                    <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, whiteSpace: 'pre-wrap' }}>
+                      {quoteDetailModal.quote.lender_notes}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Quote Actions */}
+              {isLender && (quoteDetailModal.quote.status === 'submitted' || quoteDetailModal.quote.status === 'under_review') && (
+                <div style={commonStyles.card}>
+                  <h3 style={{ margin: `0 0 ${theme.spacing.md} 0` }}>Actions</h3>
+                  <div style={{ display: 'flex', gap: theme.spacing.md, flexWrap: 'wrap' }}>
+                    <Button
+                      variant="success"
+                      onClick={() => setQuoteActionModal({ open: true, quote: quoteDetailModal.quote, action: 'accept', notes: '', counterPrice: '' })}
+                    >
+                      Accept Quote
+                    </Button>
+                    <Button
+                      variant="warning"
+                      onClick={() => setQuoteActionModal({ open: true, quote: quoteDetailModal.quote, action: 'negotiate', notes: '', counterPrice: '' })}
+                    >
+                      Request Negotiation
+                    </Button>
+                    <Button
+                      variant="error"
+                      onClick={() => setQuoteActionModal({ open: true, quote: quoteDetailModal.quote, action: 'reject', notes: '', counterPrice: '' })}
+                    >
+                      Reject Quote
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Messages Section */}
+              <div style={commonStyles.card}>
+                <h3 style={{ margin: `0 0 ${theme.spacing.md} 0` }}>Correspondence</h3>
+                {loadingMessages ? (
+                  <p style={{ textAlign: 'center', color: theme.colors.textSecondary }}>Loading messages...</p>
+                ) : selectedThread && threadMessages.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md, maxHeight: '400px', overflowY: 'auto' }}>
+                    {threadMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        style={{
+                          padding: theme.spacing.md,
+                          background: msg.is_own_message ? theme.colors.primaryLight : theme.colors.gray50,
+                          borderRadius: theme.borderRadius.sm,
+                          alignSelf: msg.is_own_message ? 'flex-end' : 'flex-start',
+                          maxWidth: '80%',
+                        }}
+                      >
+                        <p style={{ margin: `0 0 ${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.xs, color: theme.colors.textSecondary }}>
+                          {msg.sender_name} - {formatDate(msg.created_at)}
+                        </p>
+                        <p style={{ margin: 0, fontSize: theme.typography.fontSize.sm, whiteSpace: 'pre-wrap' }}>
+                          {msg.message}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: theme.colors.textSecondary, textAlign: 'center', padding: theme.spacing.lg }}>
+                    No messages yet. Start a conversation with the provider.
+                  </p>
+                )}
+
+                {selectedThread && (
+                  <div style={{ marginTop: theme.spacing.md, display: 'flex', gap: theme.spacing.sm }}>
+                    <Textarea
+                      value={newMessageText}
+                      onChange={(e) => setNewMessageText(e.target.value)}
+                      placeholder="Type your message..."
+                      rows={3}
+                      style={{ flex: 1 }}
+                    />
+                    <Button
+                      variant="primary"
+                      onClick={() => {
+                        sendMessage(selectedThread.id);
+                        setNewMessageText('');
+                      }}
+                      disabled={!newMessageText.trim()}
+                    >
+                      Send
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QUOTE ACTION MODAL */}
+      {quoteActionModal.open && quoteActionModal.quote && (
+        <div style={commonStyles.modalBackdrop}>
+          <div style={{ ...commonStyles.modalContent, maxWidth: '600px' }}>
+            <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>
+              {quoteActionModal.action === 'accept' ? 'Accept Quote' : 
+               quoteActionModal.action === 'reject' ? 'Reject Quote' : 
+               'Request Negotiation'}
+            </h2>
+
+            {quoteActionModal.action === 'accept' && (
+              <div>
+                <p style={{ margin: `0 0 ${theme.spacing.md} 0`, color: theme.colors.textSecondary }}>
+                  Are you sure you want to accept this quote? This will select the provider for this role.
+                </p>
+                <div style={{ marginBottom: theme.spacing.md }}>
+                  <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.medium }}>
+                    Notes (Optional)
+                  </label>
+                  <Textarea
+                    value={quoteActionModal.notes}
+                    onChange={(e) => setQuoteActionModal({ ...quoteActionModal, notes: e.target.value })}
+                    rows={3}
+                    placeholder="Add any notes about accepting this quote..."
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+                  <Button variant="outline" onClick={() => setQuoteActionModal({ open: false, quote: null, action: null, notes: '', counterPrice: '' })}>
+                    Cancel
+                  </Button>
+                  <Button variant="success" onClick={handleQuoteAction}>
+                    Accept Quote
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {quoteActionModal.action === 'reject' && (
+              <div>
+                <p style={{ margin: `0 0 ${theme.spacing.md} 0`, color: theme.colors.textSecondary }}>
+                  Please provide a reason for rejecting this quote.
+                </p>
+                <div style={{ marginBottom: theme.spacing.md }}>
+                  <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.medium }}>
+                    Reason (Required)
+                  </label>
+                  <Textarea
+                    value={quoteActionModal.notes}
+                    onChange={(e) => setQuoteActionModal({ ...quoteActionModal, notes: e.target.value })}
+                    rows={4}
+                    placeholder="Explain why you are rejecting this quote..."
+                    required
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+                  <Button variant="outline" onClick={() => setQuoteActionModal({ open: false, quote: null, action: null, notes: '', counterPrice: '' })}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="error" 
+                    onClick={handleQuoteAction}
+                    disabled={!quoteActionModal.notes.trim()}
+                  >
+                    Reject Quote
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {quoteActionModal.action === 'negotiate' && (
+              <div>
+                <p style={{ margin: `0 0 ${theme.spacing.md} 0`, color: theme.colors.textSecondary }}>
+                  Request negotiation on this quote. The provider will be notified and can respond with a revised quote.
+                </p>
+                <div style={{ marginBottom: theme.spacing.md }}>
+                  <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.medium }}>
+                    Negotiation Notes (Required)
+                  </label>
+                  <Textarea
+                    value={quoteActionModal.notes}
+                    onChange={(e) => setQuoteActionModal({ ...quoteActionModal, notes: e.target.value })}
+                    rows={4}
+                    placeholder="What would you like to negotiate? (e.g., price, terms, scope)..."
+                    required
+                  />
+                </div>
+                <div style={{ marginBottom: theme.spacing.md }}>
+                  <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.medium }}>
+                    Counter Price (Optional)
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={quoteActionModal.counterPrice}
+                    onChange={(e) => setQuoteActionModal({ ...quoteActionModal, counterPrice: e.target.value })}
+                    placeholder="e.g., 5000.00"
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+                  <Button variant="outline" onClick={() => setQuoteActionModal({ open: false, quote: null, action: null, notes: '', counterPrice: '' })}>
+                    Cancel
+                  </Button>
+                  <Button 
+                    variant="warning" 
+                    onClick={handleQuoteAction}
+                    disabled={!quoteActionModal.notes.trim()}
+                  >
+                    Request Negotiation
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Forward Quotes to Borrower Modal */}
+      {forwardQuotesModal.open && (
+        <div style={commonStyles.modalBackdrop}>
+          <div style={{ ...commonStyles.modalContent, maxWidth: '600px' }}>
+            <h2 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Forward Quotes to Borrower</h2>
+            <p style={{ margin: `0 0 ${theme.spacing.md} 0`, color: theme.colors.textSecondary }}>
+              You are forwarding {selectedQuotesForForward.length} quote{selectedQuotesForForward.length > 1 ? 's' : ''} to the borrower for review.
+            </p>
+            <div style={{ marginBottom: theme.spacing.md }}>
+              <p style={{ margin: `0 0 ${theme.spacing.sm} 0`, fontSize: theme.typography.fontSize.sm, fontWeight: theme.typography.fontWeight.semibold }}>
+                Selected Quotes:
+              </p>
+              <ul style={{ margin: 0, paddingLeft: theme.spacing.lg, fontSize: theme.typography.fontSize.sm }}>
+                {quotes.filter(q => selectedQuotesForForward.includes(q.id)).map(q => (
+                  <li key={q.id}>
+                    {q.provider_firm_name} - {q.role_type_display} - £{parseFloat(q.price_gbp).toLocaleString()}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div style={{ marginBottom: theme.spacing.lg }}>
+              <label style={{ display: 'block', marginBottom: theme.spacing.xs, fontWeight: theme.typography.fontWeight.medium }}>
+                Notes for Borrower:
+              </label>
+              <Textarea
+                value={forwardQuotesModal.notes}
+                onChange={(e) => setForwardQuotesModal({ ...forwardQuotesModal, notes: e.target.value })}
+                rows={5}
+                placeholder="Add any notes or recommendations for the borrower..."
+              />
+            </div>
+            <div style={{ display: 'flex', gap: theme.spacing.md, justifyContent: 'flex-end' }}>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setForwardQuotesModal({ open: false, notes: '' });
+                  setSelectedQuotesForForward([]);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                onClick={async () => {
+                  try {
+                    // Create or get general message thread with borrower
+                    const threadsRes = await api.get(`/api/deals/deal-message-threads/?deal_id=${dealId}&thread_type=general`);
+                    const threads = threadsRes.data.results || threadsRes.data || [];
+                    let borrowerThread = threads[0];
+                    
+                    if (!borrowerThread) {
+                      const newThreadRes = await api.post('/api/deals/deal-message-threads/', {
+                        deal: dealId,
+                        thread_type: 'general',
+                        subject: 'Quotes for Review',
+                      });
+                      borrowerThread = newThreadRes.data;
+                    }
+
+                    // Create message with quote details
+                    const selectedQuotesData = quotes.filter(q => selectedQuotesForForward.includes(q.id));
+                    const quotesList = selectedQuotesData.map(q => 
+                      `• ${q.provider_firm_name} (${q.role_type_display}) - £${parseFloat(q.price_gbp).toLocaleString()} - Lead time: ${q.lead_time_days} days`
+                    ).join('\n');
+
+                    await api.post('/api/deals/deal-messages/', {
+                      thread: borrowerThread.id,
+                      message: `[Quotes Forwarded for Review]\n\nI have forwarded the following quote(s) for your review:\n\n${quotesList}\n\n${forwardQuotesModal.notes ? `Notes: ${forwardQuotesModal.notes}` : ''}\n\nPlease review and select your preferred consultant(s).`,
+                    });
+
+                    setForwardQuotesModal({ open: false, notes: '' });
+                    setSelectedQuotesForForward([]);
+                    alert(`Successfully forwarded ${selectedQuotesForForward.length} quote(s) to borrower`);
+                  } catch (err) {
+                    alert('Failed to forward quotes: ' + (err.response?.data?.error || err.message));
+                  }
+                }}
+              >
+                Forward Quotes
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

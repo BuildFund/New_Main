@@ -11,7 +11,7 @@ from django.conf import settings
 from .models import (
     Deal, DealParty, DealStage, DealTask, DealCP, DealRequisition,
     Drawdown, DealMessageThread, DealMessage, DealDocumentLink,
-    DealDecision, AuditEvent, LawFirm
+    DealDecision, AuditEvent, LawFirm, ProviderDeliverable, DealProviderSelection
 )
 from .workflow_templates import get_all_stage_templates
 from applications.models import Application
@@ -293,7 +293,94 @@ class DealService:
                 'weight': 10,
             })
         
-        # 5. Outstanding requisitions (weight: 5 points)
+        # 5. Provider deliverables (weight: 20 points)
+        # Check for required provider deliverables based on deal type and selected providers
+        provider_deliverable_score = 0
+        provider_deliverable_max = 20
+        
+        # Check if valuer is selected and if final valuation report is approved
+        valuer_selected = DealProviderSelection.objects.filter(
+            deal=deal,
+            role_type='valuer'
+        ).exists()
+        
+        if valuer_selected:
+            valuation_final = ProviderDeliverable.objects.filter(
+                deal=deal,
+                role_type='valuer',
+                deliverable_type='valuation_report',
+                status='approved'
+            ).exists()
+            if valuation_final:
+                provider_deliverable_score += 8  # Valuation report weight: 8 points
+            else:
+                breakdown.append({
+                    'category': 'Valuation Report',
+                    'current': 0,
+                    'required': 1,
+                    'weight': 8,
+                    'note': 'Final valuation report must be approved'
+                })
+        else:
+            # No valuer selected - check if deal requires valuation
+            # For now, assume all deals require valuation unless explicitly not required
+            breakdown.append({
+                'category': 'Valuation Report',
+                'current': 0,
+                'required': 0,
+                'weight': 8,
+                'note': 'No valuer selected'
+            })
+        
+        # Check if IMS is selected (development finance only) and if initial report is approved
+        if deal.facility_type == 'development':
+            ims_selected = DealProviderSelection.objects.filter(
+                deal=deal,
+                role_type='monitoring_surveyor'
+            ).exists()
+            
+            if ims_selected:
+                ims_initial = ProviderDeliverable.objects.filter(
+                    deal=deal,
+                    role_type='monitoring_surveyor',
+                    deliverable_type='ims_initial_report',
+                    status='approved'
+                ).exists()
+                if ims_initial:
+                    provider_deliverable_score += 7  # IMS initial report weight: 7 points
+                else:
+                    breakdown.append({
+                        'category': 'IMS Initial Report',
+                        'current': 0,
+                        'required': 1,
+                        'weight': 7,
+                        'note': 'IMS initial report must be approved'
+                    })
+            else:
+                breakdown.append({
+                    'category': 'IMS Initial Report',
+                    'current': 0,
+                    'required': 0,
+                    'weight': 7,
+                    'note': 'No IMS selected'
+                })
+        
+        # Check if legal CPs are satisfied (solicitor workspace)
+        solicitor_selected = DealProviderSelection.objects.filter(
+            deal=deal,
+            role_type='solicitor',
+            acting_for_party='lender'
+        ).exists()
+        
+        if solicitor_selected:
+            # Check if all mandatory CPs are satisfied (this is already checked above, but we can verify solicitor has marked them)
+            # For now, we'll rely on the CP satisfaction check above
+            # If we want to add a specific "solicitor confirmed CPs satisfied" deliverable, we can add it here
+            pass
+        
+        score += provider_deliverable_score
+        
+        # 6. Outstanding requisitions (weight: 5 points)
         open_requisitions = deal.requisitions.filter(status__in=['open', 'responded'])
         if open_requisitions.count() == 0:
             score += 5
@@ -322,6 +409,73 @@ class DealService:
         deal.completion_readiness_score = readiness_data['score']
         deal.completion_readiness_breakdown = readiness_data
         deal.save(update_fields=['completion_readiness_score', 'completion_readiness_breakdown', 'updated_at'])
+    
+    @staticmethod
+    def check_completion_readiness(deal: Deal) -> Dict[str, Any]:
+        """
+        Check if deal is ready to complete by verifying all required provider deliverables.
+        Returns dict with 'ready' boolean and 'blockers' list.
+        """
+        blockers = []
+        
+        # Check if valuer is selected and final valuation report is approved
+        valuer_selected = DealProviderSelection.objects.filter(
+            deal=deal,
+            role_type='valuer'
+        ).exists()
+        
+        if valuer_selected:
+            valuation_final = ProviderDeliverable.objects.filter(
+                deal=deal,
+                role_type='valuer',
+                deliverable_type='valuation_report',
+                status='approved'
+            ).exists()
+            if not valuation_final:
+                blockers.append('Final valuation report must be approved')
+        
+        # Check if IMS is selected (development finance only) and initial report is approved
+        if deal.facility_type == 'development':
+            ims_selected = DealProviderSelection.objects.filter(
+                deal=deal,
+                role_type='monitoring_surveyor'
+            ).exists()
+            
+            if ims_selected:
+                ims_initial = ProviderDeliverable.objects.filter(
+                    deal=deal,
+                    role_type='monitoring_surveyor',
+                    deliverable_type='ims_initial_report',
+                    status='approved'
+                ).exists()
+                if not ims_initial:
+                    blockers.append('IMS initial report must be approved')
+        
+        # Check if all mandatory CPs are satisfied
+        mandatory_cps = deal.conditions_precedent.filter(is_mandatory=True)
+        if mandatory_cps.count() > 0:
+            satisfied_cps = mandatory_cps.filter(status__in=['satisfied', 'approved']).count()
+            if satisfied_cps < mandatory_cps.count():
+                blockers.append(f'All mandatory CPs must be satisfied ({satisfied_cps}/{mandatory_cps.count()})')
+        
+        # Check if solicitor has confirmed legal readiness (if solicitor selected)
+        solicitor_selected = DealProviderSelection.objects.filter(
+            deal=deal,
+            role_type='solicitor',
+            acting_for_party='lender'
+        ).exists()
+        
+        if solicitor_selected:
+            # Check if there are any open requisitions that block completion
+            open_requisitions = deal.requisitions.filter(status__in=['open', 'responded'])
+            if open_requisitions.count() > 0:
+                blockers.append(f'All requisitions must be closed ({open_requisitions.count()} open)')
+        
+        return {
+            'ready': len(blockers) == 0,
+            'blockers': blockers,
+            'checked_at': timezone.now().isoformat(),
+        }
 
 
 class WorkflowEngine:
@@ -400,6 +554,46 @@ class WorkflowEngine:
                 deal=deal,
                 party_type='monitoring_surveyor',
                 appointment_status='active'
+            ).exists()
+        
+        # Check for provider deliverables
+        if 'valuation' in criterion_lower and ('final' in criterion_lower or 'issued' in criterion_lower or 'approved' in criterion_lower):
+            # Check if final valuation report is approved
+            return ProviderDeliverable.objects.filter(
+                deal=deal,
+                role_type='valuer',
+                deliverable_type='valuation_report',
+                status='approved'
+            ).exists()
+        
+        elif 'ims' in criterion_lower and ('initial' in criterion_lower or 'report' in criterion_lower) and ('issued' in criterion_lower or 'approved' in criterion_lower):
+            # Check if IMS initial report is approved (for development finance)
+            if deal.facility_type == 'development':
+                return ProviderDeliverable.objects.filter(
+                    deal=deal,
+                    role_type='monitoring_surveyor',
+                    deliverable_type='ims_initial_report',
+                    status='approved'
+                ).exists()
+            else:
+                # Not required for non-development deals
+                return True
+        
+        elif 'legal' in criterion_lower and ('cps' in criterion_lower or 'cp' in criterion_lower) and ('satisfied' in criterion_lower or 'ready' in criterion_lower):
+            # Check if all mandatory CPs are satisfied (legal workspace)
+            mandatory_cps = deal.conditions_precedent.filter(is_mandatory=True)
+            if mandatory_cps.count() == 0:
+                # No mandatory CPs defined yet
+                return False
+            return mandatory_cps.filter(status__in=['satisfied', 'approved']).count() == mandatory_cps.count()
+        
+        elif 'drawdown' in criterion_lower and 'certificate' in criterion_lower:
+            # Check if drawdown has IMS certificate (for specific drawdowns)
+            # This is checked per drawdown, not at deal level
+            # For now, return True if IMS is selected (certificate check happens at drawdown level)
+            return DealProviderSelection.objects.filter(
+                deal=deal,
+                role_type='monitoring_surveyor'
             ).exists()
         
         # Default: assume criterion is met if no specific check matches

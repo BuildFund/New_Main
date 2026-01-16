@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import api from '../api';
+import { tokenStorage } from '../utils/tokenStorage';
 import { theme, commonStyles } from '../styles/theme';
 
 function Login({ onLogin }) {
@@ -29,7 +30,7 @@ function Login({ onLogin }) {
         throw new Error('No token received');
       }
       
-      localStorage.setItem('token', token);
+      tokenStorage.setToken(token);
       
       // Try to get user info, but don't fail login if this fails
       let userRole = 'User';
@@ -50,8 +51,8 @@ function Login({ onLogin }) {
         // The role will be determined when they access role-specific pages
       }
       
-      localStorage.setItem('role', userRole);
-      localStorage.setItem('username', usernameToStore);
+      tokenStorage.setRole(userRole);
+      tokenStorage.setUsername(usernameToStore);
       
       onLogin(token, userRole);
     } catch (e) {

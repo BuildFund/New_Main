@@ -34,16 +34,9 @@ function BorrowerDashboard({ onboardingProgress, onStartOnboarding, onStartChatb
     setLoading(true);
     setError(null);
     try {
-      // Verify API connection first
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setError('No authentication token found. Please log in again.');
-        setLoading(false);
-        window.location.href = '/login';
-        return;
-      }
-      
-      console.log('Loading dashboard data with token:', token ? 'Token present' : 'No token');
+      // Don't check token here - let the API interceptor handle authentication
+      // If token is missing, the API call will fail and interceptor will handle it
+      console.log('Loading dashboard data');
       console.log('API base URL:', api.defaults.baseURL);
       
       // Load projects
@@ -67,18 +60,20 @@ function BorrowerDashboard({ onboardingProgress, onStartOnboarding, onStartChatb
         let errorMessage = 'Failed to load projects';
         if (err.response) {
           // Server responded with error
-          if (err.response.status === 401 || err.response.status === 403) {
-            errorMessage = 'Authentication failed. Please log in again.';
-            // Clear invalid token
-            localStorage.removeItem('token');
-            localStorage.removeItem('role');
-            // Redirect to login
-            window.location.href = '/login';
-            return;
+          // Don't log out from dashboard - let the api interceptor handle it
+          // Just show the error message
+          if (err.response.status === 401) {
+            errorMessage = 'Authentication failed. Please check your login.';
+            console.warn('401 error on dashboard - not logging out here, letting interceptor handle it');
+            // Don't log out here - let api.js interceptor handle it
+          } else if (err.response.status === 403) {
+            errorMessage = 'You do not have permission to access this resource.';
+            console.warn('Permission denied (403) - not logging out');
+          } else {
+            errorMessage = err.response.data?.detail || 
+                          err.response.data?.error || 
+                          `Server error: ${err.response.status}`;
           }
-          errorMessage = err.response.data?.detail || 
-                        err.response.data?.error || 
-                        `Server error: ${err.response.status}`;
         } else if (err.request) {
           // Request made but no response (network error, CORS, etc.)
           // Check if it's a CORS error specifically
@@ -124,8 +119,13 @@ function BorrowerDashboard({ onboardingProgress, onStartOnboarding, onStartChatb
         const peRes = await api.get('/api/private-equity/opportunities/');
         opportunities = peRes.data || [];
       } catch (err) {
-        console.warn('Failed to load private equity opportunities:', err);
         // Don't fail completely if PE fails, just continue with 0
+        // Don't log out on 401/403 - these are optional
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          console.warn('Permission/authentication error loading PE opportunities - continuing without them');
+        } else {
+          console.warn('Failed to load private equity opportunities:', err);
+        }
       }
 
       // Load recent messages and unread count (optional)
@@ -139,8 +139,13 @@ function BorrowerDashboard({ onboardingProgress, onStartOnboarding, onStartChatb
         const unreadRes = await api.get('/api/messaging/messages/unread_count/');
         unread = unreadRes.data?.unread_count || 0;
       } catch (err) {
-        console.warn('Failed to load messages:', err);
         // Don't fail completely if messages fail
+        // Don't log out on 401/403 - these are optional
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          console.warn('Permission/authentication error loading messages - continuing without them');
+        } else {
+          console.warn('Failed to load messages:', err);
+        }
       }
 
       const pendingProjects = projects.filter(p => p.status === 'pending_review' || p.status === 'draft').length;
@@ -167,8 +172,13 @@ function BorrowerDashboard({ onboardingProgress, onStartOnboarding, onStartChatb
         savedProducts = favouritesRes.data?.results || favouritesRes.data || [];
         savedCount = savedProducts.length;
       } catch (err) {
-        console.warn('Failed to load saved products:', err);
         // Continue without saved products
+        // Don't log out on 401/403 - these are optional
+        if (err.response?.status === 401 || err.response?.status === 403) {
+          console.warn('Permission/authentication error loading saved products - continuing without them');
+        } else {
+          console.warn('Failed to load saved products:', err);
+        }
       }
 
       setStats({

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import api from '../api';
 import { theme, commonStyles } from '../styles/theme';
+import { tokenStorage } from '../utils/tokenStorage';
 import Button from '../components/Button';
 import Badge from '../components/Badge';
 import ApplicationProgress from '../components/ApplicationProgress';
@@ -28,7 +29,7 @@ function ApplicationDetail() {
   const [documentTypes, setDocumentTypes] = useState([]);
   const [underwriting, setUnderwriting] = useState(null);
   const [givingConsent, setGivingConsent] = useState(false);
-  const role = localStorage.getItem('role');
+  const role = tokenStorage.getRole() || '';
   const isLender = role === 'Lender';
   const isBorrower = role === 'Borrower';
 
@@ -590,14 +591,16 @@ function ApplicationDetail() {
             <div style={commonStyles.card}>
               <h3 style={{ margin: `0 0 ${theme.spacing.lg} 0` }}>Quick Actions</h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}>
-                <Link 
-                  to={`/${role.toLowerCase()}/messages?application_id=${application.id}`} 
-                  style={{ textDecoration: 'none' }}
-                >
-                  <Button variant="primary" style={{ width: '100%' }}>
-                    Message {role === 'Borrower' ? 'Lender' : 'Borrower'}
-                  </Button>
-                </Link>
+                {role && (
+                  <Link 
+                    to={`/${role.toLowerCase()}/messages?application_id=${application.id}`} 
+                    style={{ textDecoration: 'none' }}
+                  >
+                    <Button variant="primary" style={{ width: '100%' }}>
+                      Message {role === 'Borrower' ? 'Lender' : 'Borrower'}
+                    </Button>
+                  </Link>
+                )}
                 
                 {/* Lender: View Deal Room (if accepted) */}
                 {isLender && application.status === 'accepted' && application.deal_deal_id && (
@@ -712,11 +715,13 @@ function ApplicationDetail() {
               ))}
             </div>
           )}
-          <div style={{ marginTop: theme.spacing.lg }}>
-            <Link to={`/${role.toLowerCase()}/messages?application_id=${application.id}`}>
-              <Button variant="primary">Go to Messages</Button>
-            </Link>
-          </div>
+          {role && (
+            <div style={{ marginTop: theme.spacing.lg }}>
+              <Link to={`/${role.toLowerCase()}/messages?application_id=${application.id}`}>
+                <Button variant="primary">Go to Messages</Button>
+              </Link>
+            </div>
+          )}
         </div>
       )}
 

@@ -278,10 +278,33 @@ function ConsultantDashboard({ defaultTab }) {
           }}
         >
           <h3 style={{ margin: 0, fontSize: theme.typography.fontSize['2xl'], color: theme.colors.primary }}>
-            {services.length}
+            {enquiries.filter(e => !['declined', 'quoted', 'expired'].includes(e.status)).length}
           </h3>
           <p style={{ margin: theme.spacing.xs + ' 0 0 0', color: theme.colors.textSecondary }}>
-            Service Opportunities
+            Active Quote Requests
+          </p>
+        </div>
+        <div 
+          style={{
+            ...commonStyles.card,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+          onClick={() => setActiveTab('enquiries')}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-4px)';
+            e.currentTarget.style.boxShadow = theme.shadows.lg;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = theme.shadows.sm;
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: theme.typography.fontSize['2xl'], color: theme.colors.warning }}>
+            {enquiries.filter(e => ['sent', 'received', 'acknowledged', 'preparing_quote', 'queries_raised', 'ready_to_submit'].includes(e.status)).length}
+          </h3>
+          <p style={{ margin: theme.spacing.xs + ' 0 0 0', color: theme.colors.textSecondary }}>
+            Pending Enquiries
           </p>
         </div>
         <div 
@@ -301,10 +324,33 @@ function ConsultantDashboard({ defaultTab }) {
           }}
         >
           <h3 style={{ margin: 0, fontSize: theme.typography.fontSize['2xl'], color: theme.colors.info }}>
-            {quotes.length}
+            {quotes.filter(q => !['withdrawn', 'expired'].includes(q.status)).length}
           </h3>
           <p style={{ margin: theme.spacing.xs + ' 0 0 0', color: theme.colors.textSecondary }}>
             Quotes Submitted
+          </p>
+        </div>
+        <div 
+          style={{
+            ...commonStyles.card,
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+          }}
+          onClick={() => setActiveTab('my-deals')}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-4px)';
+            e.currentTarget.style.boxShadow = theme.shadows.lg;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = theme.shadows.sm;
+          }}
+        >
+          <h3 style={{ margin: 0, fontSize: theme.typography.fontSize['2xl'], color: theme.colors.success }}>
+            {myDeals.length}
+          </h3>
+          <p style={{ margin: theme.spacing.xs + ' 0 0 0', color: theme.colors.textSecondary }}>
+            My Deals
           </p>
         </div>
         <div 
@@ -327,7 +373,7 @@ function ConsultantDashboard({ defaultTab }) {
           }}
         >
           <h3 style={{ margin: 0, fontSize: theme.typography.fontSize['2xl'], color: theme.colors.success }}>
-            {appointments.filter(a => a.status === 'in_progress' || a.status === 'appointed').length}
+            {appointments.filter(a => ['proposed', 'confirmed', 'in_progress', 'appointed'].includes(a.status)).length}
           </h3>
           <p style={{ margin: theme.spacing.xs + ' 0 0 0', color: theme.colors.textSecondary }}>
             Active Appointments
@@ -367,13 +413,12 @@ function ConsultantDashboard({ defaultTab }) {
         borderBottom: `2px solid ${theme.colors.gray200}`,
         marginBottom: theme.spacing.lg,
       }}>
-        {['opportunities', 'enquiries', 'quotes', 'my-deals', 'appointments', 'profile'].map(tab => (
+        {['opportunities', 'quotes', 'my-deals', 'appointments', 'profile'].map(tab => (
           <button
             key={tab}
             onClick={() => {
               setActiveTab(tab);
               if (tab === 'opportunities') navigate('/consultant/services');
-              else if (tab === 'enquiries') { /* Stay on dashboard */ }
               else if (tab === 'quotes') navigate('/consultant/quotes');
               else if (tab === 'my-deals') { /* Stay on dashboard */ }
               else if (tab === 'appointments') navigate('/consultant/appointments');
@@ -398,48 +443,119 @@ function ConsultantDashboard({ defaultTab }) {
       {/* Tab Content */}
       {activeTab === 'opportunities' && (
         <div>
-          <h2 style={{ marginBottom: theme.spacing.md }}>Service Opportunities</h2>
+          <h2 style={{ marginBottom: theme.spacing.md }}>New Opportunities</h2>
           
-          {/* Show deal-based enquiries (NEW SYSTEM) */}
-          {enquiries.length > 0 && (
+          {/* Show deal-based enquiries (NEW SYSTEM) - Only active opportunities */}
+          {enquiries.filter(e => !['quoted', 'declined', 'expired'].includes(e.status)).length > 0 && (
             <div style={{ marginBottom: theme.spacing.xl }}>
-              <h3 style={{ marginBottom: theme.spacing.md, fontSize: theme.typography.fontSize.lg }}>
-                Quote Requests (Deal-Based)
-              </h3>
               <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}>
-                {enquiries.map(enquiry => {
+                {enquiries
+                  .filter(e => !['quoted', 'declined', 'expired'].includes(e.status)) // Only show active opportunities
+                  .sort((a, b) => new Date(b.sent_at || b.created_at) - new Date(a.sent_at || a.created_at)) // Sort by newest first
+                  .map(enquiry => {
                   const isExpired = enquiry.quote_due_at && new Date(enquiry.quote_due_at) < new Date();
                   const hasQuote = enquiry.has_quote;
+                  const dealSummary = enquiry.deal_summary_snapshot || {};
+                  const project = dealSummary.project || {};
+                  const commercialIndicators = dealSummary.commercial_indicators || {};
                   
                   return (
                     <div key={enquiry.id} style={commonStyles.card}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: theme.spacing.sm }}>
                         <div style={{ flex: 1 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
-                            <h3 style={{ margin: 0 }}>{enquiry.role_type_display || enquiry.role_type}</h3>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs, flexWrap: 'wrap' }}>
+                            <h3 style={{ margin: 0, fontSize: theme.typography.fontSize.xl }}>
+                              {enquiry.role_type_display || enquiry.role_type} - Deal {enquiry.deal_id_display || enquiry.deal}
+                            </h3>
                             <Badge color={getStatusColor(enquiry.status)}>
                               {enquiry.status_display || enquiry.status}
                             </Badge>
                             {isExpired && <Badge color={theme.colors.error}>Expired</Badge>}
                             {enquiry.acknowledged_at && <Badge color={theme.colors.success}>Acknowledged</Badge>}
                           </div>
-                          <p style={{ color: theme.colors.textSecondary, margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm }}>
-                            Deal: {enquiry.deal_id_display || enquiry.deal}
-                            {enquiry.sent_at && ` | Received: ${new Date(enquiry.sent_at).toLocaleDateString()}`}
-                            {enquiry.quote_due_at && ` | Due: ${new Date(enquiry.quote_due_at).toLocaleDateString()}`}
-                          </p>
-                          {enquiry.deal_summary_snapshot && enquiry.deal_summary_snapshot.project && (
+                          
+                          {/* Project Location */}
+                          {project.address && (
                             <p style={{ color: theme.colors.textSecondary, margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm }}>
-                              {enquiry.deal_summary_snapshot.project.address && `${enquiry.deal_summary_snapshot.project.address}, `}
-                              {enquiry.deal_summary_snapshot.project.town && `${enquiry.deal_summary_snapshot.project.town}, `}
-                              {enquiry.deal_summary_snapshot.project.county && `${enquiry.deal_summary_snapshot.project.county}`}
+                              📍 {project.address}
+                              {project.town && `, ${project.town}`}
+                              {project.county && `, ${project.county}`}
                             </p>
                           )}
+                          
+                          {/* Deal Summary - Key Information */}
+                          {(dealSummary.facility_type_display || commercialIndicators.loan_amount_range || commercialIndicators.ltv_range || commercialIndicators.interest_rate_range) && (
+                            <div style={{
+                              marginTop: theme.spacing.sm,
+                              padding: theme.spacing.md,
+                              background: theme.colors.gray50,
+                              borderRadius: theme.borderRadius.sm,
+                            }}>
+                              <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                                gap: theme.spacing.sm,
+                              }}>
+                                {dealSummary.facility_type_display && (
+                                  <div>
+                                    <strong style={{ fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>Facility Type:</strong>
+                                    <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm }}>{dealSummary.facility_type_display}</p>
+                                  </div>
+                                )}
+                                {commercialIndicators.loan_amount_range && (
+                                  <div>
+                                    <strong style={{ fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>Loan Amount:</strong>
+                                    <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm }}>{commercialIndicators.loan_amount_range}</p>
+                                  </div>
+                                )}
+                                {commercialIndicators.ltv_range && (
+                                  <div>
+                                    <strong style={{ fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>LTV:</strong>
+                                    <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm }}>{commercialIndicators.ltv_range}</p>
+                                  </div>
+                                )}
+                                {commercialIndicators.interest_rate_range && (
+                                  <div>
+                                    <strong style={{ fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>Interest Rate:</strong>
+                                    <p style={{ margin: `${theme.spacing.xs} 0 0 0`, fontSize: theme.typography.fontSize.sm }}>{commercialIndicators.interest_rate_range}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Dates */}
+                          <div style={{ marginTop: theme.spacing.sm, display: 'flex', gap: theme.spacing.md, flexWrap: 'wrap' }}>
+                            {enquiry.sent_at && (
+                              <span style={{ fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
+                                📅 Received: {new Date(enquiry.sent_at).toLocaleDateString()}
+                              </span>
+                            )}
+                            {enquiry.quote_due_at && (
+                              <span style={{ 
+                                fontSize: theme.typography.fontSize.sm, 
+                                color: isExpired ? theme.colors.error : theme.colors.textSecondary,
+                                fontWeight: isExpired ? theme.typography.fontWeight.semibold : 'normal'
+                              }}>
+                                ⏰ Due: {new Date(enquiry.quote_due_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Lender Notes */}
                           {enquiry.lender_notes && (
-                            <p style={{ margin: `${theme.spacing.sm} 0`, fontSize: theme.typography.fontSize.sm, fontStyle: 'italic', color: theme.colors.textSecondary }}>
-                              {enquiry.lender_notes}
-                            </p>
+                            <div style={{
+                              marginTop: theme.spacing.sm,
+                              padding: theme.spacing.sm,
+                              background: theme.colors.infoLight,
+                              borderRadius: theme.borderRadius.sm,
+                              fontSize: theme.typography.fontSize.sm,
+                            }}>
+                              <strong>Lender Notes:</strong> {enquiry.lender_notes}
+                            </div>
                           )}
+                          
+                          {/* Acknowledgment Info */}
                           {enquiry.acknowledged_at && (
                             <div style={{
                               marginTop: theme.spacing.sm,
@@ -456,7 +572,7 @@ function ConsultantDashboard({ defaultTab }) {
                           )}
                         </div>
                       </div>
-                      <div style={{ display: 'flex', gap: theme.spacing.sm, marginTop: theme.spacing.md }}>
+                      <div style={{ display: 'flex', gap: theme.spacing.sm, marginTop: theme.spacing.md, flexWrap: 'wrap' }}>
                         <Button
                           variant="outline"
                           size="sm"
@@ -534,124 +650,11 @@ function ConsultantDashboard({ defaultTab }) {
           )}
           
           {/* Show message if no opportunities at all */}
-          {enquiries.length === 0 && services.length === 0 && (
+          {enquiries.filter(e => !['quoted', 'declined', 'expired'].includes(e.status)).length === 0 && services.length === 0 && (
             <div style={commonStyles.card}>
-              <p>No service opportunities available at this time.</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'enquiries' && (
-        <div>
-          <h2 style={{ marginBottom: theme.spacing.md }}>My Enquiries (Quote Requests)</h2>
-          {enquiries.length === 0 ? (
-            <div style={commonStyles.card}>
-              <p>No quote requests at this time.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}>
-              {enquiries.map(enquiry => {
-                const hasQuote = quotes.some(q => q.enquiry_id === enquiry.id);
-                const isExpired = enquiry.quote_due_at && new Date(enquiry.quote_due_at) < new Date();
-                
-                return (
-                  <div key={enquiry.id} style={commonStyles.card}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: theme.spacing.sm }}>
-                      <div style={{ flex: 1 }}>
-                        <h3 style={{ margin: 0 }}>
-                          {enquiry.role_type_display || enquiry.role_type} - Deal {enquiry.deal_id_display || enquiry.deal}
-                        </h3>
-                        <p style={{ color: theme.colors.textSecondary, margin: theme.spacing.xs + ' 0' }}>
-                          Received: {new Date(enquiry.sent_at).toLocaleDateString()}
-                          {enquiry.quote_due_at && (
-                            <span style={{ marginLeft: theme.spacing.md, color: isExpired ? theme.colors.error : theme.colors.textSecondary }}>
-                              Due: {new Date(enquiry.quote_due_at).toLocaleDateString()}
-                            </span>
-                          )}
-                        </p>
-                        {enquiry.deal_summary_snapshot && Object.keys(enquiry.deal_summary_snapshot).length > 0 && (
-                          <div style={{ marginTop: theme.spacing.sm, padding: theme.spacing.sm, background: theme.colors.gray50, borderRadius: theme.borderRadius.sm }}>
-                            <p style={{ fontSize: theme.typography.fontSize.sm, margin: 0 }}>
-                              <strong>Deal Summary:</strong> {JSON.stringify(enquiry.deal_summary_snapshot, null, 2).substring(0, 200)}...
-                            </p>
-                          </div>
-                        )}
-                        {enquiry.lender_notes && (
-                          <p style={{ marginTop: theme.spacing.sm, fontSize: theme.typography.fontSize.sm, color: theme.colors.textSecondary }}>
-                            <strong>Notes:</strong> {enquiry.lender_notes}
-                          </p>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xs, alignItems: 'flex-end' }}>
-                        <Badge color={getStatusColor(enquiry.status)}>
-                          {enquiry.status_display || enquiry.status}
-                        </Badge>
-                        {hasQuote && (
-                          <Badge color={theme.colors.success}>
-                            Quote Submitted
-                          </Badge>
-                        )}
-                        {isExpired && enquiry.status !== 'quoted' && (
-                          <Badge color={theme.colors.error}>
-                            Expired
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-                    <div style={{ marginTop: theme.spacing.md, display: 'flex', gap: theme.spacing.sm }}>
-                      {!hasQuote && enquiry.status !== 'declined' && !isExpired && (
-                        <>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => navigate(`/consultant/enquiries/${enquiry.id}`)}
-                          >
-                            View Details
-                          </Button>
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            onClick={() => navigate(`/consultant/enquiries/${enquiry.id}/quote`)}
-                          >
-                            Submit Quote
-                          </Button>
-                        </>
-                      )}
-                      {hasQuote && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            const quote = quotes.find(q => q.enquiry_id === enquiry.id);
-                            if (quote) {
-                              navigate(`/consultant/quotes/${quote.id}`);
-                            }
-                          }}
-                        >
-                          View Quote
-                        </Button>
-                      )}
-                      {enquiry.status === 'sent' && !enquiry.viewed_at && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={async () => {
-                            try {
-                              await api.post(`/api/deals/provider-enquiries/${enquiry.id}/mark_viewed/`);
-                              await loadDashboardData();
-                            } catch (err) {
-                              console.error('Failed to mark as viewed:', err);
-                            }
-                          }}
-                        >
-                          Mark as Viewed
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
+              <p style={{ textAlign: 'center', color: theme.colors.textSecondary }}>
+                No new opportunities available at this time.
+              </p>
             </div>
           )}
         </div>

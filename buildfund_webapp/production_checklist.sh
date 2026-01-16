@@ -36,10 +36,10 @@ if [ -f .env ]; then
         echo "   [ERROR] GOOGLE_API_KEY not configured"
     fi
     
-    if grep -q "COMPANIES_HOUSE_API_KEY=" .env && ! grep -q "COMPANIES_HOUSE_API_KEY=\[YOUR" .env; then
-        echo "   [OK] COMPANIES_HOUSE_API_KEY is set"
+    if grep -q "HMRC_API_KEY=" .env && ! grep -q "HMRC_API_KEY=your_hmrc" .env; then
+        echo "   [OK] HMRC_API_KEY is set"
     else
-        echo "   [ERROR] COMPANIES_HOUSE_API_KEY not configured"
+        echo "   [ERROR] HMRC_API_KEY not configured"
     fi
 else
     echo "   [ERROR] .env file not found"
@@ -74,10 +74,12 @@ fi
 
 echo ""
 echo "6. API Keys Security..."
-if grep -r "AIzaSyAxx5YgFTXW0CEze3iriL2Bg01FxNM6k_M\|06b96b3f-520d-45d3-8c47-40a51c560a2d" --exclude-dir=node_modules --exclude="*.pyc" --exclude=".env" . 2>/dev/null | grep -q .; then
-    echo "   [ERROR] API keys found in code files (should only be in .env)"
+# Check for common API key patterns in code (not in .env files)
+if grep -rE "(sk-[a-zA-Z0-9_-]{20,}|AIza[0-9A-Za-z_-]{35}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})" --exclude-dir=node_modules --exclude="*.pyc" --exclude=".env" --exclude="*.env.example" --exclude="production_checklist.sh" . 2>/dev/null | grep -q .; then
+    echo "   [ERROR] Potential API keys found in code files (should only be in .env)"
+    echo "   [WARNING] Review the files above and ensure no secrets are committed"
 else
-    echo "   [OK] No API keys found in code"
+    echo "   [OK] No obvious API key patterns found in code"
 fi
 
 echo ""

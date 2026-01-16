@@ -2,7 +2,21 @@
 .env
 .env.local
 .env.*.local
+.env.*
+*.env
+*.env.local
+*.env.production
+*.env.development
 *-LAPTOP-*.env
+*-LAPTOP*.env
+.env.example.local
+.env.production.local
+.env.development.local
+
+# Machine-specific environment files
+*-LAPTOP-*.env
+*-DESKTOP-*.env
+*-PC-*.env
 
 # Python
 __pycache__/

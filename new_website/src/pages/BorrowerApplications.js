@@ -28,18 +28,20 @@ function BorrowerApplications() {
         });
         
         // Provide more specific error messages
+        // Don't log out here - let the API interceptor handle authentication errors
         let errorMessage = 'Failed to load applications';
         if (err.response) {
-          if (err.response.status === 401 || err.response.status === 403) {
+          if (err.response.status === 401) {
             errorMessage = 'Authentication failed. Please log in again.';
-            localStorage.removeItem('token');
-            localStorage.removeItem('role');
-            window.location.href = '/login';
-            return;
+            // Don't log out here - API interceptor will handle it if needed
+          } else if (err.response.status === 403) {
+            errorMessage = 'You do not have permission to view applications.';
+            // 403 is a permission error, not authentication - don't log out
+          } else {
+            errorMessage = err.response.data?.detail || 
+                          err.response.data?.error || 
+                          `Server error: ${err.response.status}`;
           }
-          errorMessage = err.response.data?.detail || 
-                        err.response.data?.error || 
-                        `Server error: ${err.response.status}`;
         } else if (err.request) {
           errorMessage = 'Network Error: Cannot connect to backend server. Please ensure the Django server is running on http://localhost:8000';
         } else {

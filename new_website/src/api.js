@@ -1,7 +1,8 @@
 import axios from 'axios';
+import { tokenStorage } from './utils/tokenStorage';
 
 // Create an Axios instance for API calls.  All requests include
-// the token from localStorage (if present) in the Authorization header.
+// the token from secure storage (if present) in the Authorization header.
 const api = axios.create({
   baseURL: process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000',
   timeout: 10000, // 10 second timeout
@@ -11,7 +12,7 @@ const api = axios.create({
 // Skip adding token for the auth endpoint
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = tokenStorage.getToken();
     // Don't add token to auth endpoints
     if (token && !config.url?.includes('/api/auth/token/')) {
       config.headers['Authorization'] = `Token ${token}`;
@@ -55,19 +56,39 @@ api.interceptors.response.use(
                                 url.includes('/generate-underwriter-report/') ||
                                 url.includes('/lock-underwriter-report/') ||
                                 url.includes('/private-equity/') ||
-                                url.includes('/messaging/');
+                                url.includes('/messaging/') ||
+                                url.includes('/onboarding/progress/') ||
+                                url.includes('/products/');
       
       // 403 errors are permission errors, NOT authentication errors - never log out for these
       // Only log out for actual authentication failures (401 without step-up auth)
-      if (error.response.status === 401 && !isStepUpAuth && !isPermissionError) {
-        // Only do this if we're not already on the login page
-        // and if the request wasn't to the auth endpoint (to avoid logout loops)
-        if (window.location.pathname !== '/login' && !error.config?.url?.includes('/api/auth/token/')) {
-          localStorage.removeItem('token');
-          localStorage.removeItem('role');
-          window.location.href = '/login';
-        }
+      // Be more conservative - only log out if we're sure it's an auth error
+      // Don't auto-logout from dashboard pages - let components handle errors gracefully
+      const isOnDashboard = window.location.pathname === '/' || 
+                           window.location.pathname === '/dashboard' ||
+                           window.location.pathname === '/borrower/dashboard' ||
+                           window.location.pathname.startsWith('/borrower/') ||
+                           window.location.pathname.startsWith('/lender/') ||
+                           window.location.pathname.startsWith('/consultant/');
+      
+      // Only auto-logout on 401 if:
+      // 1. Not step-up auth
+      // 2. Not a known permission endpoint
+      // 3. Not on dashboard (let component handle it)
+      // 4. Not already on login page
+      // 5. Not an auth endpoint (to avoid loops)
+      if (error.response.status === 401 && 
+          !isStepUpAuth && 
+          !isPermissionError && 
+          !isOnDashboard &&
+          window.location.pathname !== '/login' && 
+          !error.config?.url?.includes('/api/auth/token/')) {
+        tokenStorage.clearAll();
+        window.location.href = '/login';
       }
+      
+      // Never auto-logout on 403 (permission errors) - these are not authentication failures
+      // 403 means the user is authenticated but doesn't have permission
       // For step-up auth, 403 (permission errors), or permission-related 401, don't log out - let the component handle it
     }
     return Promise.reject(error);

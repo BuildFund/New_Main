@@ -99,8 +99,8 @@ class Deal(models.Model):
     
     def calculate_readiness_score(self):
         """Calculate completion readiness score."""
-        # This will be implemented in the service
-        pass
+        from .services import DealService
+        DealService.update_completion_readiness(self)
 
 
 class DealParty(models.Model):
@@ -677,10 +677,33 @@ class DealMessageThread(models.Model):
     thread_type = models.CharField(max_length=20, choices=THREAD_TYPE_CHOICES, default='general')
     subject = models.CharField(max_length=200, blank=True)
     
-    # Visibility - who can see this thread
+    # Creator
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="created_message_threads",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    
+    # Visibility - who can see this thread (party-based scoping)
     visible_to_parties = models.ManyToManyField(
         DealParty,
-        related_name="accessible_threads"
+        related_name="accessible_threads",
+        help_text="Parties that can view and participate in this thread"
+    )
+    
+    # Role-based scoping (additional to party scoping)
+    visible_to_roles = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of roles that can see this thread (e.g., ['lender', 'borrower', 'valuer'])"
+    )
+    
+    # Private thread flag
+    is_private = models.BooleanField(
+        default=False,
+        help_text="If True, only explicitly added parties can see this thread"
     )
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1035,6 +1058,13 @@ class PerformanceMetric(models.Model):
         ('completion_time', 'Completion Time'),
         ('stage_dwell_time', 'Stage Dwell Time'),
         ('task_completion_time', 'Task Completion Time'),
+        # Provider-specific metrics
+        ('quote_response_time', 'Quote Response Time'),  # Time from enquiry sent to quote submitted (hours)
+        ('quote_acceptance_rate', 'Quote Acceptance Rate'),  # Percentage of quotes accepted
+        ('deliverable_delivery_time', 'Deliverable Delivery Time'),  # Time from instruction to deliverable approved (days)
+        ('deliverable_rework_count', 'Deliverable Rework Count'),  # Number of rejected/revised deliverables
+        ('appointment_lead_time', 'Appointment Lead Time'),  # Time from proposal to confirmation (hours)
+        ('time_to_completion_impact', 'Time to Completion Impact'),  # Days added/subtracted from deal completion
     ]
     
     # Target entity
@@ -1046,6 +1076,21 @@ class PerformanceMetric(models.Model):
         related_name="performance_metrics"
     )
     consultant_firm = models.CharField(max_length=200, blank=True, help_text="For non-panel consultants")
+    provider_firm = models.ForeignKey(
+        "consultants.ConsultantProfile",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="performance_metrics",
+        help_text="Provider firm (consultant/solicitor) for provider-specific metrics"
+    )
+    role_type = models.CharField(
+        max_length=30,
+        choices=ProviderEnquiry.ROLE_TYPE_CHOICES if 'ProviderEnquiry' in globals() else [],
+        null=True,
+        blank=True,
+        help_text="Provider role type (valuer, monitoring_surveyor, solicitor) for provider metrics"
+    )
     solicitor_user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -1073,11 +1118,27 @@ class PerformanceMetric(models.Model):
         ordering = ['-period_end', 'metric_type']
         indexes = [
             models.Index(fields=['law_firm', 'metric_type', '-period_end']),
+            models.Index(fields=['provider_firm', 'role_type', 'metric_type', '-period_end']),
         ]
     
     def __str__(self) -> str:
-        entity = self.law_firm or self.consultant_firm or f"User {self.solicitor_user_id}"
-        return f"{entity} - {self.metric_type} ({self.period_start} to {self.period_end})"
+        if self.provider_firm:
+            role_choices = [
+                ('valuer', 'Valuer'),
+                ('monitoring_surveyor', 'Monitoring Surveyor'),
+                ('solicitor', 'Solicitor'),
+            ]
+            role_display = dict(role_choices).get(self.role_type, self.role_type) if self.role_type else 'Provider'
+            entity = f"{self.provider_firm.organisation_name} ({role_display})"
+        elif self.law_firm:
+            entity = str(self.law_firm)
+        elif self.consultant_firm:
+            entity = self.consultant_firm
+        elif self.solicitor_user:
+            entity = f"User {self.solicitor_user_id}"
+        else:
+            entity = "Unknown"
+        return f"{entity} - {self.get_metric_type_display()} ({self.period_start} to {self.period_end})"
 
 
 # ============================================================================
@@ -1095,8 +1156,12 @@ class ProviderEnquiry(models.Model):
     
     STATUS_CHOICES = [
         ('sent', 'Sent'),
-        ('viewed', 'Viewed'),
-        ('quoted', 'Quoted'),
+        ('received', 'Received'),  # Consultant has marked as received
+        ('acknowledged', 'Acknowledged'),  # Consultant acknowledged and will quote
+        ('preparing_quote', 'Preparing Quote'),  # Consultant is actively preparing quote
+        ('queries_raised', 'Queries Raised'),  # Consultant has questions before quoting
+        ('ready_to_submit', 'Ready to Submit'),  # Quote prepared, ready to submit
+        ('quoted', 'Quoted'),  # Quote has been submitted
         ('declined', 'Declined'),
         ('expired', 'Expired'),
     ]
@@ -1424,6 +1489,23 @@ class ProviderDeliverable(models.Model):
     )
     reviewed_at = models.DateTimeField(null=True, blank=True)
     review_notes = models.TextField(blank=True, help_text="Review comments/notes")
+    
+    # Version history (JSON array of {version, document_id, uploaded_at, uploaded_by, status, review_notes})
+    version_history = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="History of all versions of this deliverable"
+    )
+    
+    # Parent deliverable (for tracking revisions)
+    parent_deliverable = models.ForeignKey(
+        'self',
+        related_name="revisions",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="Previous version if this is a revision"
+    )
     
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

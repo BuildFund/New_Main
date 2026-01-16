@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import api from '../api';
+import { tokenStorage } from '../utils/tokenStorage';
 import { theme } from '../styles/theme';
 import Input from './Input';
 import Button from './Button';
@@ -27,8 +28,7 @@ function StepUpAuth({ onAuthenticated, onCancel, purpose = 'access sensitive inf
 
       if (res.data.success && res.data.session_key) {
         // Store session key for future requests
-        localStorage.setItem('stepUpSessionKey', res.data.session_key);
-        localStorage.setItem('stepUpExpiresAt', res.data.expires_at);
+        tokenStorage.setStepUpSessionKey(res.data.session_key, res.data.expires_at);
         onAuthenticated();
       } else {
         setError('Incorrect password. Please try again.');

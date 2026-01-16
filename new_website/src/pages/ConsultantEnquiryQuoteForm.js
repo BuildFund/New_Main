@@ -53,6 +53,20 @@ function ConsultantEnquiryQuoteForm() {
     setLoading(true);
 
     try {
+      // Validate enquiry is loaded
+      if (!enquiry) {
+        setError('Enquiry details not loaded. Please refresh the page.');
+        setLoading(false);
+        return;
+      }
+
+      // Validate required fields
+      if (!formData.price_gbp || !formData.lead_time_days || !formData.scope_summary) {
+        setError('Please fill in all required fields (Price, Lead Time, Scope Summary).');
+        setLoading(false);
+        return;
+      }
+
       // Parse deliverables if it's a string (comma-separated)
       let deliverablesList = [];
       if (formData.deliverables) {
@@ -60,26 +74,74 @@ function ConsultantEnquiryQuoteForm() {
       }
 
       const payload = {
-        enquiry: enquiryId,
+        enquiry: parseInt(enquiryId), // Ensure it's an integer
         role_type: enquiry.role_type,
         price_gbp: parseFloat(formData.price_gbp),
         lead_time_days: parseInt(formData.lead_time_days),
         earliest_available_date: formData.earliest_available_date || null,
-        scope_summary: formData.scope_summary,
-        assumptions: formData.assumptions || '',
+        scope_summary: formData.scope_summary.trim(),
+        assumptions: (formData.assumptions || '').trim(),
         deliverables: deliverablesList,
         validity_days: parseInt(formData.validity_days) || 30,
-        payment_terms: formData.payment_terms || '',
-        provider_notes: formData.provider_notes || '',
+        payment_terms: (formData.payment_terms || '').trim(),
+        provider_notes: (formData.provider_notes || '').trim(),
       };
 
-      await api.post('/api/deals/provider-quotes/', payload);
+      // Validate numeric values
+      if (isNaN(payload.price_gbp) || payload.price_gbp <= 0) {
+        setError('Please enter a valid quote price.');
+        setLoading(false);
+        return;
+      }
+
+      if (isNaN(payload.lead_time_days) || payload.lead_time_days <= 0) {
+        setError('Please enter a valid lead time in days.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('Submitting quote with payload:', payload);
+      const response = await api.post('/api/deals/provider-quotes/', payload);
+      console.log('Quote submission response:', response.data);
+      
       navigate('/consultant/dashboard', {
         state: { message: 'Quote submitted successfully!', activeTab: 'quotes' }
       });
     } catch (err) {
       console.error('Quote submission error:', err);
-      setError(err.response?.data?.detail || err.response?.data?.error || 'Failed to submit quote');
+      console.error('Error response:', err.response);
+      
+      // Extract detailed error message
+      let errorMessage = 'Failed to submit quote';
+      if (err.response) {
+        if (err.response.data) {
+          if (typeof err.response.data === 'string') {
+            errorMessage = err.response.data;
+          } else if (err.response.data.detail) {
+            errorMessage = err.response.data.detail;
+          } else if (err.response.data.error) {
+            errorMessage = err.response.data.error;
+          } else if (err.response.data.non_field_errors) {
+            errorMessage = err.response.data.non_field_errors.join(', ');
+          } else {
+            // Try to extract field-specific errors
+            const fieldErrors = Object.entries(err.response.data)
+              .map(([field, errors]) => `${field}: ${Array.isArray(errors) ? errors.join(', ') : errors}`)
+              .join('; ');
+            if (fieldErrors) {
+              errorMessage = fieldErrors;
+            }
+          }
+        } else {
+          errorMessage = `Server error: ${err.response.status} ${err.response.statusText}`;
+        }
+      } else if (err.request) {
+        errorMessage = 'Network error: Could not connect to server. Please check your connection.';
+      } else {
+        errorMessage = err.message || 'Unknown error occurred';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -127,14 +189,14 @@ function ConsultantEnquiryQuoteForm() {
         }}>
           <h3 style={{ margin: `0 0 ${theme.spacing.sm} 0` }}>Enquiry Details</h3>
           <div style={{ display: 'flex', gap: theme.spacing.md, flexWrap: 'wrap', marginBottom: theme.spacing.sm }}>
-            <Badge color={theme.colors.primary}>
-              {enquiry.role_type_display || enquiry.role_type}
+            <Badge variant="info">
+              {enquiry.role_type_display || enquiry.role_type || 'N/A'}
             </Badge>
-            <Badge color={getStatusColor(enquiry.status)}>
-              {enquiry.status_display || enquiry.status}
+            <Badge variant={getStatusVariant(enquiry.status)}>
+              {enquiry.status_display || enquiry.status || 'N/A'}
             </Badge>
             {isExpired && (
-              <Badge color={theme.colors.error}>Expired</Badge>
+              <Badge variant="error">Expired</Badge>
             )}
           </div>
           <p style={{ margin: `${theme.spacing.xs} 0`, color: theme.colors.textSecondary }}>
@@ -308,15 +370,20 @@ function ConsultantEnquiryQuoteForm() {
     </div>
   );
 
-  function getStatusColor(status) {
-    const colors = {
-      sent: theme.colors.info,
-      viewed: theme.colors.primary,
-      quoted: theme.colors.success,
-      declined: theme.colors.error,
-      expired: theme.colors.error,
+  function getStatusVariant(status) {
+    if (!status) return 'info';
+    const variantMap = {
+      sent: 'info',
+      received: 'info',
+      acknowledged: 'info',
+      preparing_quote: 'warning',
+      queries_raised: 'warning',
+      ready_to_submit: 'success',
+      quoted: 'success',
+      declined: 'error',
+      expired: 'error',
     };
-    return colors[status] || theme.colors.gray500;
+    return variantMap[status] || 'info';
   }
 }
 

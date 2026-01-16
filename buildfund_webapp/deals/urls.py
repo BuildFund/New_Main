@@ -7,7 +7,8 @@ from .views import (
     DealRequisitionViewSet, DrawdownViewSet, DealMessageThreadViewSet,
     DealMessageViewSet, DealDocumentLinkViewSet, LawFirmViewSet, LawFirmPanelMembershipViewSet,
     ProviderEnquiryViewSet, ProviderQuoteViewSet, DealProviderSelectionViewSet,
-    ProviderStageInstanceViewSet, ProviderDeliverableViewSet, ProviderAppointmentViewSet
+    ProviderStageInstanceViewSet, ProviderDeliverableViewSet, ProviderAppointmentViewSet,
+    ProviderMetricsViewSet
 )
 
 router = DefaultRouter()
@@ -28,6 +29,7 @@ router.register(r'deal-provider-selections', DealProviderSelectionViewSet, basen
 router.register(r'provider-stages', ProviderStageInstanceViewSet, basename='provider-stage')
 router.register(r'provider-deliverables', ProviderDeliverableViewSet, basename='provider-deliverable')
 router.register(r'provider-appointments', ProviderAppointmentViewSet, basename='provider-appointment')
+router.register(r'provider-metrics', ProviderMetricsViewSet, basename='provider-metrics')
 
 urlpatterns = [
     path('', include(router.urls)),
