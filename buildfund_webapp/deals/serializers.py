@@ -7,7 +7,9 @@ from django.contrib.auth import get_user_model
 from .models import (
     Deal, DealParty, DealStage, DealTask, DealCP, DealRequisition,
     Drawdown, DealMessageThread, DealMessage, DealDocumentLink,
-    DealDecision, AuditEvent, LawFirm, LawFirmPanelMembership, PerformanceMetric
+    DealDecision, AuditEvent, LawFirm, LawFirmPanelMembership, PerformanceMetric,
+    ProviderEnquiry, ProviderQuote, DealProviderSelection, ProviderStageInstance,
+    ProviderDeliverable, ProviderAppointment
 )
 
 User = get_user_model()
@@ -87,7 +89,7 @@ class DealStageSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'deal', 'stage_number', 'name', 'description',
             'entry_criteria', 'exit_criteria', 'sla_target_days',
-            'status', 'status_display', 'started_at', 'completed_at',
+            'status', 'status_display', 'entered_at', 'completed_at',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -174,6 +176,9 @@ class DrawdownSerializer(serializers.ModelSerializer):
     
     lender_approval_status_display = serializers.CharField(source='get_lender_approval_status_display', read_only=True)
     approved_by_name = serializers.SerializerMethodField()
+    ms_review_status_display = serializers.CharField(source='get_ms_review_status_display', read_only=True)
+    ms_reviewed_by_name = serializers.SerializerMethodField()
+    supporting_documents = serializers.SerializerMethodField()
     
     def get_approved_by_name(self, obj):
         """Get approved_by user name."""
@@ -181,18 +186,33 @@ class DrawdownSerializer(serializers.ModelSerializer):
             return obj.approved_by.get_full_name() or obj.approved_by.username
         return None
     
+    def get_ms_reviewed_by_name(self, obj):
+        """Get ms_reviewed_by user name."""
+        if obj.ms_reviewed_by:
+            return obj.ms_reviewed_by.get_full_name() or obj.ms_reviewed_by.username
+        return None
+    
+    def get_supporting_documents(self, obj):
+        """Get supporting documents for this drawdown, grouped by category."""
+        from .models import DealDocumentLink
+        doc_links = DealDocumentLink.objects.filter(drawdown=obj).select_related('document', 'uploaded_by')
+        return DealDocumentLinkSerializer(doc_links, many=True).data
+    
     class Meta:
         model = Drawdown
         fields = [
             'id', 'deal', 'sequence_number', 'requested_amount', 'purpose',
             'requested_at', 'ims_inspection_required', 'ims_inspection_date',
             'ims_certificate_document', 'ims_report_document',
+            'ms_review_status', 'ms_review_status_display', 'ms_reviewed_by', 'ms_reviewed_by_name',
+            'ms_reviewed_at', 'ms_approved_at', 'ms_notes',
             'lender_approval_status', 'lender_approval_status_display', 'approved_by',
             'approved_by_name', 'approved_at', 'paid_at', 'payment_reference',
             'milestone', 'retention_amount', 'contingencies',
+            'supporting_documents',
             'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'requested_at', 'approved_at', 'paid_at', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'requested_at', 'approved_at', 'paid_at', 'ms_reviewed_at', 'ms_approved_at', 'created_at', 'updated_at']
 
 
 class DealMessageThreadSerializer(serializers.ModelSerializer):
@@ -262,12 +282,17 @@ class DealDocumentLinkSerializer(serializers.ModelSerializer):
             return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
         return None
     
+    document_file_name = serializers.CharField(source='document.file_name', read_only=True)
+    document_file_size = serializers.IntegerField(source='document.file_size', read_only=True)
+    document_file_type = serializers.CharField(source='document.file_type', read_only=True)
+    
     class Meta:
         model = DealDocumentLink
         fields = [
-            'id', 'deal', 'document', 'document_category', 'document_category_display',
-            'visibility', 'visibility_display', 'visible_to_consultants',
+            'id', 'deal', 'drawdown', 'document', 'document_category', 'document_category_display',
+            'document_type_description', 'visibility', 'visibility_display', 'visible_to_consultants',
             'uploaded_by', 'uploaded_by_name', 'uploaded_at', 'created_at',
+            'document_file_name', 'document_file_size', 'document_file_type',
         ]
         read_only_fields = ['id', 'uploaded_at', 'created_at']
 
@@ -383,3 +408,172 @@ class PerformanceMetricSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+# ============================================================================
+# Provider Workflow Serializers
+# ============================================================================
+
+class ProviderEnquirySerializer(serializers.ModelSerializer):
+    """Serializer for ProviderEnquiry model."""
+    
+    provider_firm_name = serializers.CharField(source='provider_firm.organisation_name', read_only=True)
+    role_type_display = serializers.CharField(source='get_role_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    deal_id_display = serializers.CharField(source='deal.deal_id', read_only=True)
+    has_quote = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ProviderEnquiry
+        fields = [
+            'id', 'deal', 'deal_id_display', 'role_type', 'role_type_display',
+            'provider_firm', 'provider_firm_name', 'status', 'status_display',
+            'sent_at', 'viewed_at', 'quote_due_at', 'deal_summary_snapshot',
+            'lender_notes', 'decline_reason', 'acknowledged_at', 'expected_quote_date',
+            'acknowledgment_notes', 'has_quote', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'sent_at', 'viewed_at', 'acknowledged_at', 'created_at', 'updated_at']
+    
+    def get_has_quote(self, obj):
+        """Check if enquiry has an associated quote."""
+        return obj.quotes.exists()
+
+
+class ProviderQuoteSerializer(serializers.ModelSerializer):
+    """Serializer for ProviderQuote model."""
+    
+    enquiry_id = serializers.IntegerField(source='enquiry.id', read_only=True)
+    provider_firm_name = serializers.CharField(source='enquiry.provider_firm.organisation_name', read_only=True)
+    role_type_display = serializers.CharField(source='get_role_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    deal_id = serializers.CharField(source='enquiry.deal.deal_id', read_only=True)
+    enquiry_acknowledged_at = serializers.DateTimeField(source='enquiry.acknowledged_at', read_only=True)
+    enquiry_expected_quote_date = serializers.DateField(source='enquiry.expected_quote_date', read_only=True)
+    enquiry_acknowledgment_notes = serializers.CharField(source='enquiry.acknowledgment_notes', read_only=True)
+    
+    class Meta:
+        model = ProviderQuote
+        fields = [
+            'id', 'enquiry', 'enquiry_id', 'role_type', 'role_type_display',
+            'price_gbp', 'lead_time_days', 'earliest_available_date',
+            'scope_summary', 'assumptions', 'deliverables', 'validity_days',
+            'payment_terms', 'status', 'status_display', 'version',
+            'submitted_at', 'reviewed_at', 'accepted_at',
+            'provider_notes', 'lender_notes', 'deal_id',
+            'provider_firm_name', 'enquiry_acknowledged_at', 'enquiry_expected_quote_date',
+            'enquiry_acknowledgment_notes', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'submitted_at', 'reviewed_at', 'accepted_at', 'created_at', 'updated_at']
+
+
+class DealProviderSelectionSerializer(serializers.ModelSerializer):
+    """Serializer for DealProviderSelection model."""
+    
+    provider_firm_name = serializers.CharField(source='provider_firm.organisation_name', read_only=True)
+    role_type_display = serializers.CharField(source='get_role_type_display', read_only=True)
+    selected_by_name = serializers.SerializerMethodField()
+    lender_approved_by_name = serializers.SerializerMethodField()
+    quote_amount = serializers.DecimalField(source='quote.price_gbp', read_only=True, max_digits=15, decimal_places=2)
+    
+    def get_selected_by_name(self, obj):
+        if obj.selected_by:
+            return obj.selected_by.get_full_name() or obj.selected_by.username
+        return None
+    
+    def get_lender_approved_by_name(self, obj):
+        if obj.lender_approved_by:
+            return obj.lender_approved_by.get_full_name() or obj.lender_approved_by.username
+        return None
+    
+    class Meta:
+        model = DealProviderSelection
+        fields = [
+            'id', 'deal', 'role_type', 'role_type_display', 'provider_firm', 'provider_firm_name',
+            'quote', 'quote_amount', 'selected_by', 'selected_by_name', 'selected_at',
+            'lender_approval_required', 'lender_approved_at', 'lender_approved_by', 'lender_approved_by_name',
+            'acting_for_party', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'selected_at', 'lender_approved_at', 'created_at', 'updated_at']
+
+
+class ProviderStageInstanceSerializer(serializers.ModelSerializer):
+    """Serializer for ProviderStageInstance model."""
+    
+    provider_firm_name = serializers.CharField(source='provider_firm.organisation_name', read_only=True)
+    role_type_display = serializers.CharField(source='get_role_type_display', read_only=True)
+    
+    class Meta:
+        model = ProviderStageInstance
+        fields = [
+            'id', 'deal', 'role_type', 'role_type_display', 'provider_firm', 'provider_firm_name',
+            'current_stage', 'stage_entered_at', 'stage_history',
+            'instructed_at', 'started_at', 'completed_at',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'stage_entered_at', 'created_at', 'updated_at']
+
+
+class ProviderDeliverableSerializer(serializers.ModelSerializer):
+    """Serializer for ProviderDeliverable model."""
+    
+    provider_firm_name = serializers.CharField(source='provider_firm.organisation_name', read_only=True)
+    role_type_display = serializers.CharField(source='get_role_type_display', read_only=True)
+    deliverable_type_display = serializers.CharField(source='get_deliverable_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    uploaded_by_name = serializers.SerializerMethodField()
+    reviewed_by_name = serializers.SerializerMethodField()
+    document_name = serializers.CharField(source='document.file_name', read_only=True)
+    document_size = serializers.IntegerField(source='document.file_size', read_only=True)
+    
+    def get_uploaded_by_name(self, obj):
+        if obj.uploaded_by:
+            return obj.uploaded_by.get_full_name() or obj.uploaded_by.username
+        return None
+    
+    def get_reviewed_by_name(self, obj):
+        if obj.reviewed_by:
+            return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
+        return None
+    
+    class Meta:
+        model = ProviderDeliverable
+        fields = [
+            'id', 'deal', 'role_type', 'role_type_display', 'provider_firm', 'provider_firm_name',
+            'deliverable_type', 'deliverable_type_display', 'status', 'status_display', 'version',
+            'document', 'document_name', 'document_size',
+            'uploaded_at', 'uploaded_by', 'uploaded_by_name',
+            'reviewed_at', 'reviewed_by', 'reviewed_by_name', 'review_notes',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'uploaded_at', 'reviewed_at', 'created_at', 'updated_at']
+
+
+class ProviderAppointmentSerializer(serializers.ModelSerializer):
+    """Serializer for ProviderAppointment model."""
+    
+    provider_firm_name = serializers.CharField(source='provider_firm.organisation_name', read_only=True)
+    role_type_display = serializers.CharField(source='get_role_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    proposed_by_name = serializers.SerializerMethodField()
+    confirmed_by_name = serializers.SerializerMethodField()
+    
+    def get_proposed_by_name(self, obj):
+        if obj.proposed_by:
+            return obj.proposed_by.get_full_name() or obj.proposed_by.username
+        return None
+    
+    def get_confirmed_by_name(self, obj):
+        if obj.confirmed_by:
+            return obj.confirmed_by.get_full_name() or obj.confirmed_by.username
+        return None
+    
+    class Meta:
+        model = ProviderAppointment
+        fields = [
+            'id', 'deal', 'role_type', 'role_type_display', 'provider_firm', 'provider_firm_name',
+            'status', 'status_display', 'date_time', 'location', 'notes',
+            'proposed_slots', 'proposed_by', 'proposed_by_name',
+            'confirmed_at', 'confirmed_by', 'confirmed_by_name',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'confirmed_at', 'created_at', 'updated_at']

@@ -27,7 +27,7 @@ def create_consultant_services_on_acceptance(sender, instance, created, **kwargs
                 "required_qualifications": ["rics_monitoring", "rics"],
             },
             {
-                "service_type": "valuation",
+                "service_type": "valuation_surveyor",
                 "description": "Property valuation required for loan security",
                 "required_qualifications": ["rics_valuation", "rics"],
             },

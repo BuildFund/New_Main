@@ -96,6 +96,21 @@ class BorrowerProfile(models.Model):
     company_documents = models.JSONField(default=dict, blank=True)
     personal_documents = models.JSONField(default=dict, blank=True)
     
+    # Step 8: Preferred Solicitor (optional - can be added during onboarding)
+    solicitor_firm_name = models.CharField(max_length=255, blank=True, help_text="Borrower's preferred solicitor firm name")
+    solicitor_sra_number = models.CharField(max_length=50, blank=True, help_text="SRA registration number")
+    solicitor_contact_name = models.CharField(max_length=255, blank=True, help_text="Primary contact at solicitor firm")
+    solicitor_contact_email = models.EmailField(blank=True, help_text="Solicitor contact email")
+    solicitor_contact_phone = models.CharField(max_length=30, blank=True, help_text="Solicitor contact phone")
+    solicitor_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='borrower_solicitor_for',
+        help_text="If solicitor is already a user in the system, link to their account"
+    )
+    
     documents = models.ManyToManyField("documents.Document", blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

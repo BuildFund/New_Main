@@ -1,0 +1,162 @@
+{
+  "application_id": 7,
+  "generated_at": "2026-01-13T17:11:29.992212+00:00",
+  "company_profile": {
+    "company_name": "Johnson Commercial Properties",
+    "company_number": "87654321",
+    "company_status": "Not provided",
+    "incorporation_date": "Not provided",
+    "registered_address": "Not provided",
+    "sic_codes": [],
+    "trading_address": "Not provided",
+    "primary_contact_email": "Not provided",
+    "primary_contact_phone": "Not provided",
+    "verified_at": null
+  },
+  "directors_and_shareholders": {
+    "directors": [],
+    "shareholders_pscs": []
+  },
+  "applicants_and_guarantors": {
+    "note": "No applicant data provided"
+  },
+  "financial_overview": {
+    "mode": "quick",
+    "income_total": null,
+    "expenditure_total": null,
+    "assets_total": null,
+    "liabilities_total": null,
+    "charges_summary": {
+      "total_charges": 0,
+      "active_charges": 0,
+      "satisfied_charges": 0,
+      "active_charges_list": []
+    }
+  },
+  "bank_data_summary": {
+    "method": "Not provided",
+    "note": "No bank data available"
+  },
+  "funding_requirement": {
+    "loan_amount": 850000.0,
+    "term_months": 24,
+    "interest_rate": null,
+    "ltv_ratio": 71.99,
+    "product_type": "senior_debt",
+    "repayment_method": "sale",
+    "security": "Property",
+    "exit_strategy": "sale"
+  },
+  "linked_project_data": {
+    "project_reference": "DSANRD",
+    "funding_type": "senior_debt",
+    "property_type": "residential",
+    "address": "45 Victoria Road, London, SW1A 2BB",
+    "development_extent": "conversion",
+    "tenure": "freehold",
+    "purchase_price": 789038.0,
+    "build_cost": 328504.0,
+    "current_market_value": 1074310.0,
+    "gross_development_value": 1180718.0,
+    "funds_provided_by_applicant": 358785.0
+  },
+  "lender_and_product_data": {
+    "lender": {
+      "name": "BARE CAPITAL LTD",
+      "company_number": "10311473",
+      "contact_email": "i***@primedevfinance.com",
+      "contact_phone": "***5432",
+      "website": "https://www.primedevfinance.com"
+    },
+    "product": {
+      "name": "Residential Development Finance",
+      "funding_type": "senior_debt",
+      "min_loan_amount": 250000.0,
+      "max_loan_amount": 5000000.0,
+      "min_term_months": 12,
+      "max_term_months": 36,
+      "interest_rate_range": "6.5-9.5%",
+      "ltv_range": "Up to 75.0%",
+      "description": "Fast-track development finance for residential projects. Competitive rates and flexible terms."
+    }
+  },
+  "documents_index": [
+    {
+      "note": "No documents indexed"
+    }
+  ],
+  "derived_metrics": {
+    "ltv": 79.12,
+    "ltc": 258.75
+  },
+  "data_completeness": {
+    "company_data": false,
+    "directors_data": false,
+    "applicants_data": false,
+    "financial_data": false,
+    "bank_data": false,
+    "project_data": true,
+    "documents": false,
+    "overall_completeness_percentage": 14.3,
+    "missing_sections": [
+      "company_data",
+      "directors_data",
+      "applicants_data",
+      "financial_data",
+      "bank_data",
+      "documents"
+    ]
+  },
+  "risk_assessment": {
+    "borrower_profile_status": "draft",
+    "borrower_profile_approved": false,
+    "company_status": "Not provided",
+    "incorporation_date": "Not provided",
+    "primary_contact_details": "Not provided",
+    "financial_data": "Not provided",
+    "bank_data": "Not provided",
+    "ltv_mismatch": "Derived LTV of 79.12% exceeds the product LTV range of up to 75.0%",
+    "ltc_ratio": "High LTC ratio of 258.75 indicating potential over-leverage",
+    "data_completeness": "Low at 14.3%"
+  },
+  "queries": [
+    {
+      "query": "Please provide the company status and incorporation date."
+    },
+    {
+      "query": "Please provide primary contact details including email and phone number."
+    },
+    {
+      "query": "Please provide detailed financial data including income, expenditure, assets, and liabilities."
+    },
+    {
+      "query": "Please provide bank data or explain why it is not available."
+    },
+    {
+      "query": "Please provide documents supporting the application."
+    },
+    {
+      "query": "Please clarify the discrepancy in LTV ratios and discuss potential mitigants."
+    }
+  ],
+  "suggested_conditions_and_covenants": [
+    {
+      "condition": "Submission of missing company, financial, and bank data."
+    },
+    {
+      "condition": "Provision of primary contact details."
+    },
+    {
+      "condition": "Clarification and mitigation of the LTV discrepancy."
+    },
+    {
+      "condition": "Submission of all required supporting documents."
+    },
+    {
+      "covenant": "Regular financial reporting to monitor LTV and LTC ratios."
+    },
+    {
+      "covenant": "Restriction on further borrowing without prior consent."
+    }
+  ]
+}

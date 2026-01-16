@@ -186,6 +186,7 @@ class DealParty(models.Model):
         ],
         default='invited'
     )
+    confirmed_at = models.DateTimeField(null=True, blank=True, help_text="When consultant confirmed appointment")
     access_granted_at = models.DateTimeField(null=True, blank=True)
     removed_at = models.DateTimeField(null=True, blank=True)
     removal_reason = models.TextField(blank=True)
@@ -593,6 +594,31 @@ class Drawdown(models.Model):
         related_name="ims_drawdown_reports"
     )
     
+    # MS (Monitoring Surveyor) workflow
+    ms_review_status = models.CharField(
+        max_length=30,
+        choices=[
+            ('pending', 'Pending MS Review'),
+            ('under_review', 'Under MS Review'),
+            ('site_visit_scheduled', 'Site Visit Scheduled'),
+            ('site_visit_completed', 'Site Visit Completed'),
+            ('ms_approved', 'MS Approved for Lender Review'),
+            ('ms_rejected', 'MS Rejected'),
+        ],
+        default='pending'
+    )
+    ms_reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ms_reviewed_drawdowns",
+        help_text="Monitoring Surveyor who reviewed this drawdown"
+    )
+    ms_reviewed_at = models.DateTimeField(null=True, blank=True)
+    ms_approved_at = models.DateTimeField(null=True, blank=True)
+    ms_notes = models.TextField(blank=True, help_text="MS review notes and comments")
+    
     # Approval workflow
     lender_approval_status = models.CharField(max_length=30, choices=STATUS_CHOICES, default='requested')
     approved_by = models.ForeignKey(
@@ -734,7 +760,27 @@ class DealDocumentLink(models.Model):
             ('reports', 'Reports'),
             ('financial', 'Financial'),
             ('drawdowns', 'Drawdowns'),
+            # Drawdown-specific categories
+            ('drawdown_progress_reports', 'Drawdown: Progress Reports'),
+            ('drawdown_photos', 'Drawdown: Photos'),
+            ('drawdown_consultants_building_control', 'Drawdown: Consultants & Building Control'),
+            ('drawdown_other', 'Drawdown: Other'),
         ]
+    )
+    # Document type/description for drawdown documents
+    document_type_description = models.CharField(
+        max_length=200,
+        blank=True,
+        help_text="Description or type of document (e.g., 'Site Visit Photos', 'Progress Report Week 4')"
+    )
+    # Optional link to specific drawdown (for drawdown-related documents)
+    drawdown = models.ForeignKey(
+        'Drawdown',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='supporting_documents',
+        help_text="If this document is related to a specific drawdown request"
     )
     visibility = models.CharField(max_length=30, choices=VISIBILITY_CHOICES, default='shared')
     
@@ -1032,3 +1078,440 @@ class PerformanceMetric(models.Model):
     def __str__(self) -> str:
         entity = self.law_firm or self.consultant_firm or f"User {self.solicitor_user_id}"
         return f"{entity} - {self.metric_type} ({self.period_start} to {self.period_end})"
+
+
+# ============================================================================
+# Deal-Level Provider Workflow Models
+# ============================================================================
+
+class ProviderEnquiry(models.Model):
+    """Represents a quote request sent to a provider firm for a specific role on a deal."""
+    
+    ROLE_TYPE_CHOICES = [
+        ('valuer', 'Valuer'),
+        ('monitoring_surveyor', 'Monitoring Surveyor'),
+        ('solicitor', 'Solicitor'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('sent', 'Sent'),
+        ('viewed', 'Viewed'),
+        ('quoted', 'Quoted'),
+        ('declined', 'Declined'),
+        ('expired', 'Expired'),
+    ]
+    
+    deal = models.ForeignKey(
+        Deal,
+        related_name="provider_enquiries",
+        on_delete=models.CASCADE
+    )
+    role_type = models.CharField(max_length=30, choices=ROLE_TYPE_CHOICES)
+    provider_firm = models.ForeignKey(
+        "consultants.ConsultantProfile",
+        related_name="deal_enquiries",
+        on_delete=models.CASCADE,
+        help_text="The consultant/solicitor firm this enquiry is sent to"
+    )
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='sent')
+    sent_at = models.DateTimeField(auto_now_add=True)
+    viewed_at = models.DateTimeField(null=True, blank=True)
+    quote_due_at = models.DateTimeField(null=True, blank=True, help_text="Deadline for quote submission")
+    
+    # Acknowledgment fields
+    acknowledged_at = models.DateTimeField(null=True, blank=True, help_text="When provider acknowledged they will quote")
+    expected_quote_date = models.DateField(null=True, blank=True, help_text="Provider's expected quote submission date")
+    acknowledgment_notes = models.TextField(blank=True, help_text="Provider's notes when acknowledging (e.g., timeline, questions)")
+    
+    # Deal summary snapshot (redacted for provider)
+    deal_summary_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Snapshot of deal information visible to provider (redacted)"
+    )
+    
+    # Notes
+    lender_notes = models.TextField(blank=True, help_text="Internal notes from lender")
+    decline_reason = models.TextField(blank=True, help_text="Reason if declined by provider")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Provider Enquiry"
+        verbose_name_plural = "Provider Enquiries"
+        ordering = ['-sent_at']
+        indexes = [
+            models.Index(fields=['deal', 'role_type', 'status']),
+            models.Index(fields=['provider_firm', 'status']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"Enquiry: {self.get_role_type_display()} for {self.deal} - {self.provider_firm.organisation_name}"
+
+
+class ProviderQuote(models.Model):
+    """Represents a quote submitted by a provider in response to an enquiry."""
+    
+    STATUS_CHOICES = [
+        ('submitted', 'Submitted'),
+        ('under_review', 'Under Review'),
+        ('accepted', 'Accepted'),
+        ('declined', 'Declined'),
+        ('withdrawn', 'Withdrawn'),
+        ('expired', 'Expired'),
+    ]
+    
+    enquiry = models.ForeignKey(
+        ProviderEnquiry,
+        related_name="quotes",
+        on_delete=models.CASCADE
+    )
+    role_type = models.CharField(max_length=30, choices=ProviderEnquiry.ROLE_TYPE_CHOICES)
+    
+    # Quote details
+    price_gbp = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        help_text="Total quote price in GBP"
+    )
+    lead_time_days = models.PositiveIntegerField(help_text="Estimated lead time in days")
+    earliest_available_date = models.DateField(null=True, blank=True)
+    
+    # Scope and assumptions
+    scope_summary = models.TextField(help_text="Summary of services included in quote")
+    assumptions = models.TextField(blank=True, help_text="Assumptions and exclusions")
+    deliverables = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of deliverables included"
+    )
+    
+    # Terms
+    validity_days = models.PositiveIntegerField(default=30, help_text="Quote validity period in days")
+    payment_terms = models.TextField(blank=True)
+    
+    # Status and versioning
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='submitted')
+    version = models.PositiveIntegerField(default=1, help_text="Quote version number")
+    
+    submitted_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    
+    # Notes
+    provider_notes = models.TextField(blank=True, help_text="Internal notes from provider")
+    lender_notes = models.TextField(blank=True, help_text="Internal notes from lender")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Provider Quote"
+        verbose_name_plural = "Provider Quotes"
+        ordering = ['-submitted_at']
+        indexes = [
+            models.Index(fields=['enquiry', 'status']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"Quote: {self.get_role_type_display()} - £{self.price_gbp} ({self.enquiry.deal})"
+
+
+class DealProviderSelection(models.Model):
+    """Represents the selection of a provider for a specific role on a deal."""
+    
+    ROLE_TYPE_CHOICES = [
+        ('valuer', 'Valuer'),
+        ('monitoring_surveyor', 'Monitoring Surveyor'),
+        ('solicitor', 'Solicitor'),
+    ]
+    
+    deal = models.ForeignKey(
+        Deal,
+        related_name="provider_selections",
+        on_delete=models.CASCADE
+    )
+    role_type = models.CharField(max_length=30, choices=ROLE_TYPE_CHOICES)
+    provider_firm = models.ForeignKey(
+        "consultants.ConsultantProfile",
+        related_name="deal_selections",
+        on_delete=models.CASCADE
+    )
+    quote = models.ForeignKey(
+        ProviderQuote,
+        related_name="selections",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="The quote that was accepted (if applicable)"
+    )
+    
+    # Selection details
+    selected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="provider_selections_made",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="User who made the selection (borrower or lender)"
+    )
+    selected_at = models.DateTimeField(auto_now_add=True)
+    
+    # Lender approval
+    lender_approval_required = models.BooleanField(
+        default=True,
+        help_text="Whether lender approval is required for this selection"
+    )
+    lender_approved_at = models.DateTimeField(null=True, blank=True)
+    lender_approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="provider_selections_approved",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    
+    # Acting for party (for solicitors)
+    acting_for_party = models.CharField(
+        max_length=20,
+        choices=DealParty.ACTING_FOR_CHOICES,
+        null=True,
+        blank=True,
+        help_text="Required for solicitors: acting for lender or borrower"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Deal Provider Selection"
+        verbose_name_plural = "Deal Provider Selections"
+        unique_together = [('deal', 'role_type')]  # One provider per role per deal
+        ordering = ['deal', 'role_type']
+        indexes = [
+            models.Index(fields=['deal', 'role_type']),
+            models.Index(fields=['provider_firm']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"Selection: {self.get_role_type_display()} for {self.deal} - {self.provider_firm.organisation_name}"
+
+
+class ProviderStageInstance(models.Model):
+    """Tracks the current stage and progress for a provider on a deal."""
+    
+    ROLE_TYPE_CHOICES = [
+        ('valuer', 'Valuer'),
+        ('monitoring_surveyor', 'Monitoring Surveyor'),
+        ('solicitor', 'Solicitor'),
+    ]
+    
+    deal = models.ForeignKey(
+        Deal,
+        related_name="provider_stages",
+        on_delete=models.CASCADE
+    )
+    role_type = models.CharField(max_length=30, choices=ROLE_TYPE_CHOICES)
+    provider_firm = models.ForeignKey(
+        "consultants.ConsultantProfile",
+        related_name="deal_stage_instances",
+        on_delete=models.CASCADE
+    )
+    
+    # Stage tracking
+    current_stage = models.CharField(
+        max_length=50,
+        help_text="Current stage name (e.g., 'instructed', 'inspection_completed')"
+    )
+    stage_entered_at = models.DateTimeField(auto_now_add=True)
+    
+    # Stage history (JSON array of {stage, entered_at, exited_at})
+    stage_history = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="History of stage transitions"
+    )
+    
+    # Timestamps for key milestones
+    instructed_at = models.DateTimeField(null=True, blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Provider Stage Instance"
+        verbose_name_plural = "Provider Stage Instances"
+        unique_together = [('deal', 'role_type', 'provider_firm')]
+        ordering = ['deal', 'role_type']
+        indexes = [
+            models.Index(fields=['deal', 'role_type']),
+            models.Index(fields=['provider_firm', 'current_stage']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"Stage: {self.get_role_type_display()} for {self.deal} - {self.current_stage}"
+
+
+class ProviderDeliverable(models.Model):
+    """Represents a deliverable (document/report) uploaded by a provider."""
+    
+    DELIVERABLE_TYPE_CHOICES = [
+        # Valuer deliverables
+        ('valuation_report', 'Valuation Report'),
+        ('reliance_letter', 'Reliance Letter'),
+        # IMS deliverables
+        ('ims_initial_report', 'IMS Initial Report'),
+        ('monitoring_report', 'Monitoring Report'),
+        ('drawdown_certificate', 'Drawdown Certificate'),
+        # Solicitor deliverables
+        ('legal_doc_pack', 'Legal Document Pack'),
+        ('cp_evidence', 'CP Evidence'),
+        ('completion_statement', 'Completion Statement'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('uploaded', 'Uploaded'),
+        ('under_review', 'Under Review'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('revised', 'Revised'),
+    ]
+    
+    deal = models.ForeignKey(
+        Deal,
+        related_name="provider_deliverables",
+        on_delete=models.CASCADE
+    )
+    role_type = models.CharField(max_length=30, choices=ProviderEnquiry.ROLE_TYPE_CHOICES)
+    provider_firm = models.ForeignKey(
+        "consultants.ConsultantProfile",
+        related_name="deal_deliverables",
+        on_delete=models.CASCADE
+    )
+    
+    deliverable_type = models.CharField(max_length=50, choices=DELIVERABLE_TYPE_CHOICES)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='uploaded')
+    version = models.PositiveIntegerField(default=1)
+    
+    # Document link
+    document = models.ForeignKey(
+        "documents.Document",
+        related_name="provider_deliverables",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True
+    )
+    
+    # Review workflow
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="deliverables_uploaded",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="deliverables_reviewed",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_notes = models.TextField(blank=True, help_text="Review comments/notes")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Provider Deliverable"
+        verbose_name_plural = "Provider Deliverables"
+        ordering = ['-uploaded_at']
+        indexes = [
+            models.Index(fields=['deal', 'role_type', 'status']),
+            models.Index(fields=['provider_firm', 'status']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"{self.get_deliverable_type_display()} v{self.version} - {self.deal} ({self.get_status_display()})"
+
+
+class ProviderAppointment(models.Model):
+    """Represents an appointment (site visit, meeting) for a provider on a deal."""
+    
+    ROLE_TYPE_CHOICES = [
+        ('valuer', 'Valuer'),
+        ('monitoring_surveyor', 'Monitoring Surveyor'),
+        ('solicitor', 'Solicitor'),
+    ]
+    
+    STATUS_CHOICES = [
+        ('proposed', 'Proposed'),
+        ('confirmed', 'Confirmed'),
+        ('rescheduled', 'Rescheduled'),
+        ('cancelled', 'Cancelled'),
+        ('completed', 'Completed'),
+    ]
+    
+    deal = models.ForeignKey(
+        Deal,
+        related_name="provider_appointments",
+        on_delete=models.CASCADE
+    )
+    role_type = models.CharField(max_length=30, choices=ROLE_TYPE_CHOICES)
+    provider_firm = models.ForeignKey(
+        "consultants.ConsultantProfile",
+        related_name="deal_appointments",
+        on_delete=models.CASCADE
+    )
+    
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='proposed')
+    date_time = models.DateTimeField(null=True, blank=True, help_text="Scheduled date and time")
+    location = models.CharField(max_length=500, blank=True, help_text="Appointment location/address")
+    notes = models.TextField(blank=True, help_text="Appointment notes/agenda")
+    
+    # Proposed time slots (for initial proposal)
+    proposed_slots = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="List of proposed time slots [{date_time, notes}]"
+    )
+    
+    # Booking workflow
+    proposed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="appointments_proposed",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="User who proposed the appointment (usually provider)"
+    )
+    confirmed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        related_name="appointments_confirmed",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        help_text="User who confirmed the appointment (usually borrower)"
+    )
+    confirmed_at = models.DateTimeField(null=True, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "Provider Appointment"
+        verbose_name_plural = "Provider Appointments"
+        ordering = ['date_time', '-created_at']
+        indexes = [
+            models.Index(fields=['deal', 'role_type', 'status']),
+            models.Index(fields=['provider_firm', 'date_time']),
+        ]
+    
+    def __str__(self) -> str:
+        return f"Appointment: {self.get_role_type_display()} for {self.deal} - {self.get_status_display()}"

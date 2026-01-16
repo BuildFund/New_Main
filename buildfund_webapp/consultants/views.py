@@ -24,11 +24,26 @@ class ConsultantProfileViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        # Consultants see their own profile, admins see all
+        service_type = self.request.query_params.get('service_type')
+        
+        # For lender inviting consultants, show all active verified consultants
+        if hasattr(user, 'lenderprofile') or user.is_staff:
+            qs = ConsultantProfile.objects.filter(is_active=True, is_verified=True)
+            if service_type:
+                # Filter by service type (valuer, monitoring_surveyor, solicitor)
+                service_map = {
+                    'valuer': 'valuation',
+                    'monitoring_surveyor': 'monitoring_surveyor',
+                    'solicitor': 'solicitor',
+                }
+                mapped_type = service_map.get(service_type, service_type)
+                qs = qs.filter(services_offered__contains=[mapped_type])
+            return qs
+        
+        # Consultants see their own profile
         if hasattr(user, "consultantprofile"):
             return ConsultantProfile.objects.filter(user=user)
-        elif user.is_staff:
-            return ConsultantProfile.objects.all()
+        
         return ConsultantProfile.objects.none()
     
     def perform_create(self, serializer):
@@ -96,8 +111,27 @@ class ConsultantServiceViewSet(viewsets.ReadOnlyModelViewSet):
         # Consultants see services they can quote on
         # Borrowers/Lenders see services for their applications
         if hasattr(user, "consultantprofile"):
-            # Show services where consultant can provide quotes
-            return ConsultantService.objects.filter(status__in=["pending", "quotes_received"])
+            consultant = user.consultantprofile
+            # Filter by consultant's services_offered
+            qs = ConsultantService.objects.filter(status__in=["pending", "quotes_received"])
+            
+            # Filter by service type - consultant must offer at least one matching service
+            service_types = consultant.services_offered or []
+            if service_types:
+                # Build Q query for any matching service type
+                from django.db.models import Q
+                service_filter = Q()
+                for service_type in service_types:
+                    service_filter |= Q(service_type=service_type)
+                qs = qs.filter(service_filter)
+            
+            # Filter by geographic coverage if consultant has specific coverage
+            if consultant.geographic_coverage:
+                # Consultant covers specific regions - filter services that match or have no geographic requirement
+                geographic_filter = Q(geographic_requirement__in=consultant.geographic_coverage) | Q(geographic_requirement="")
+                qs = qs.filter(geographic_filter)
+            
+            return qs
         elif hasattr(user, "borrowerprofile"):
             return ConsultantService.objects.filter(
                 application__project__borrower=user.borrowerprofile

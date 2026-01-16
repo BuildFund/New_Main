@@ -1,0 +1,24 @@
+================================================================================
+  BACKEND SERVER - START HERE
+================================================================================
+
+IMPORTANT: You MUST start this server manually in a PowerShell window!
+
+STEP 1: Ensure .env file exists with your API keys
+        (The .env file is gitignored and contains your secure API keys)
+
+STEP 2: Open PowerShell and run:
+        .\start_server.ps1
+        OR
+        .\start_server_debug.ps1
+
+        The scripts will automatically load API keys from .env file.
+
+STEP 3: Keep that window open!
+
+STEP 4: Test at http://localhost:8000/admin/
+
+SECURITY NOTE: API keys are stored in .env file (gitignored) and will
+               NEVER be committed to GitHub. The .env file is secure.
+
+================================================================================

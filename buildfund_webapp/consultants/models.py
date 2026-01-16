@@ -10,8 +10,9 @@ class ConsultantProfile(models.Model):
     """Extends the User model with consultant/solicitor-specific details."""
     
     SERVICE_TYPES = [
+        ("valuation_and_monitoring_surveyor", "Valuation & Monitoring Surveyor"),
         ("monitoring_surveyor", "Monitoring Surveyor"),
-        ("valuation", "Valuation"),
+        ("valuation_surveyor", "Valuation Surveyor"),
         ("solicitor", "Solicitor"),
         ("other", "Other Professional Service"),
     ]
@@ -57,7 +58,7 @@ class ConsultantProfile(models.Model):
         help_text="List of services offered: monitoring_surveyor, valuation, solicitor, other"
     )
     primary_service = models.CharField(
-        max_length=30,
+        max_length=50,
         choices=SERVICE_TYPES,
         help_text="Primary service type"
     )
@@ -152,8 +153,9 @@ class ConsultantService(models.Model):
     """Represents a specific service request for a consultant on a project."""
     
     SERVICE_TYPES = [
+        ("valuation_and_monitoring_surveyor", "Valuation & Monitoring Surveyor"),
         ("monitoring_surveyor", "Monitoring Surveyor"),
-        ("valuation", "Valuation"),
+        ("valuation_surveyor", "Valuation Surveyor"),
         ("solicitor", "Solicitor"),
     ]
     
@@ -172,7 +174,7 @@ class ConsultantService(models.Model):
         on_delete=models.CASCADE,
         help_text="The loan application requiring this service"
     )
-    service_type = models.CharField(max_length=30, choices=SERVICE_TYPES)
+    service_type = models.CharField(max_length=50, choices=SERVICE_TYPES)
     description = models.TextField(blank=True, help_text="Specific requirements for this service")
     required_by_date = models.DateField(null=True, blank=True, help_text="Required completion date")
     status = models.CharField(max_length=30, choices=STATUS_CHOICES, default="pending")

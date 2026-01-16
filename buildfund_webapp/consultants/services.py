@@ -30,10 +30,22 @@ class ConsultantMatchingService:
             is_verified=True
         )
         
-        # Filter by service type
-        consultants = consultants.filter(
-            services_offered__contains=[service.service_type]
-        )
+        # Filter by service type - check if consultant offers this service type
+        # Also handle combined roles (e.g., valuation_and_monitoring_surveyor can match both valuation_surveyor and monitoring_surveyor)
+        service_type = service.service_type
+        service_matches = {
+            'valuation_surveyor': ['valuation_surveyor', 'valuation_and_monitoring_surveyor'],
+            'monitoring_surveyor': ['monitoring_surveyor', 'valuation_and_monitoring_surveyor'],
+            'valuation_and_monitoring_surveyor': ['valuation_and_monitoring_surveyor'],
+            'solicitor': ['solicitor'],
+        }
+        matching_service_types = service_matches.get(service_type, [service_type])
+        
+        # Build Q query for any matching service type
+        service_filter = Q()
+        for match_type in matching_service_types:
+            service_filter |= Q(services_offered__contains=[match_type])
+        consultants = consultants.filter(service_filter)
         
         # Filter by geographic coverage if specified
         if service.geographic_requirement:
@@ -85,7 +97,17 @@ class ConsultantMatchingService:
         score = 0.0
         
         # Service type match (required, 30 points)
-        if service.service_type in consultant.services_offered:
+        # Handle combined roles (e.g., valuation_and_monitoring_surveyor can match both)
+        service_type = service.service_type
+        service_matches = {
+            'valuation_surveyor': ['valuation_surveyor', 'valuation_and_monitoring_surveyor'],
+            'monitoring_surveyor': ['monitoring_surveyor', 'valuation_and_monitoring_surveyor'],
+            'valuation_and_monitoring_surveyor': ['valuation_and_monitoring_surveyor'],
+            'solicitor': ['solicitor'],
+        }
+        matching_service_types = service_matches.get(service_type, [service_type])
+        
+        if any(match_type in consultant.services_offered for match_type in matching_service_types):
             score += 30.0
         
         # Geographic match (20 points)

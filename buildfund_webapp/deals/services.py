@@ -108,6 +108,45 @@ class DealService:
             except User.DoesNotExist:
                 pass
         
+        # Auto-invite borrower's solicitor if they have one in their profile
+        borrower_profile = application.project.borrower
+        if borrower_profile and (borrower_profile.solicitor_firm_name or borrower_profile.solicitor_contact_email):
+            from consultants.models import ConsultantProfile
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            
+            # Check if solicitor is already a user in the system
+            solicitor_user = None
+            if borrower_profile.solicitor_user:
+                solicitor_user = borrower_profile.solicitor_user
+            elif borrower_profile.solicitor_contact_email:
+                # Try to find user by email
+                try:
+                    solicitor_user = User.objects.get(email=borrower_profile.solicitor_contact_email)
+                    # Check if they have a ConsultantProfile
+                    if not hasattr(solicitor_user, 'consultantprofile'):
+                        solicitor_user = None
+                except User.DoesNotExist:
+                    pass
+            
+            if solicitor_user and hasattr(solicitor_user, 'consultantprofile'):
+                # Solicitor is already in system - invite them directly
+                consultant_profile = solicitor_user.consultantprofile
+                DealParty.objects.create(
+                    deal=deal,
+                    consultant_profile=consultant_profile,
+                    party_type='solicitor',
+                    acting_for_party='borrower',
+                    appointment_status='invited',
+                    invited_at=timezone.now(),
+                )
+            else:
+                # Solicitor not in system - create a placeholder or send invitation
+                # For now, we'll create a DealParty with the solicitor info stored
+                # The lender can later invite them or they can register
+                # TODO: Send invitation email to solicitor to join the system
+                pass
+        
         # Initialize stages from templates
         stage_templates = get_all_stage_templates(facility_type)
         

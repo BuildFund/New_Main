@@ -17,6 +17,8 @@ class ApplicationSerializer(serializers.ModelSerializer):
     lender_details = serializers.SerializerMethodField()
     product_details = serializers.SerializerMethodField()
     initiated_by = serializers.CharField(read_only=True)
+    deal_id = serializers.SerializerMethodField()
+    deal_deal_id = serializers.SerializerMethodField()
     
     class Meta:
         model = Application
@@ -38,6 +40,8 @@ class ApplicationSerializer(serializers.ModelSerializer):
             "borrower_details",
             "lender_details",
             "product_details",
+            "deal_id",
+            "deal_deal_id",
             "created_at",
             "updated_at",
         ]
@@ -131,6 +135,18 @@ class ApplicationSerializer(serializers.ModelSerializer):
                 'name': getattr(obj.product, 'name', ''),
                 'funding_type': getattr(obj.product, 'funding_type', ''),
             }
+    
+    def get_deal_id(self, obj):
+        """Return deal ID if deal exists."""
+        if hasattr(obj, 'deal'):
+            return obj.deal.id
+        return None
+    
+    def get_deal_deal_id(self, obj):
+        """Return deal deal_id (unique identifier) if deal exists."""
+        if hasattr(obj, 'deal'):
+            return obj.deal.deal_id
+        return None
 
     def validate_proposed_loan_amount(self, value):
         """Validate loan amount is positive and reasonable."""

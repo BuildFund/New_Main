@@ -35,12 +35,12 @@ class ProductViewSet(viewsets.ModelViewSet):
         user = self.request.user
         # Lender: only own products
         if hasattr(user, "lenderprofile"):
-            return Product.objects.filter(lender=user.lenderprofile)
+            return Product.objects.filter(lender=user.lenderprofile).select_related('lender')
         # Admin: all products
         if IsAdmin().has_permission(self.request, self):
-            return Product.objects.all()
+            return Product.objects.all().select_related('lender')
         # Others: active only
-        return Product.objects.filter(status="active")
+        return Product.objects.filter(status="active").select_related('lender')
 
     def get_permissions(self):
         """Assign custom permissions based on action."""
