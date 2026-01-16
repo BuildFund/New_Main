@@ -12,6 +12,7 @@ function ConsultantDashboard({ defaultTab }) {
   const [enquiries, setEnquiries] = useState([]); // ProviderEnquiry records (deal-based)
   const [quotes, setQuotes] = useState([]);
   const [appointments, setAppointments] = useState([]);
+  const [myDeals, setMyDeals] = useState([]); // Deals consultant is involved with
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -103,6 +104,15 @@ function ConsultantDashboard({ defaultTab }) {
       // Load appointments
       const appointmentsRes = await api.get('/api/consultants/appointments/');
       setAppointments(appointmentsRes.data.results || appointmentsRes.data || []);
+
+      // Load my deals (deals consultant is involved with)
+      try {
+        const dealsRes = await api.get('/api/deals/deals/my-deals/');
+        setMyDeals(dealsRes.data || []);
+      } catch (err) {
+        console.warn('Failed to load my deals:', err);
+        setMyDeals([]);
+      }
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
       setError(err.response?.data?.error || err.message || 'Failed to load dashboard data');
@@ -357,7 +367,7 @@ function ConsultantDashboard({ defaultTab }) {
         borderBottom: `2px solid ${theme.colors.gray200}`,
         marginBottom: theme.spacing.lg,
       }}>
-        {['opportunities', 'enquiries', 'quotes', 'appointments', 'profile'].map(tab => (
+        {['opportunities', 'enquiries', 'quotes', 'my-deals', 'appointments', 'profile'].map(tab => (
           <button
             key={tab}
             onClick={() => {
@@ -365,6 +375,7 @@ function ConsultantDashboard({ defaultTab }) {
               if (tab === 'opportunities') navigate('/consultant/services');
               else if (tab === 'enquiries') { /* Stay on dashboard */ }
               else if (tab === 'quotes') navigate('/consultant/quotes');
+              else if (tab === 'my-deals') { /* Stay on dashboard */ }
               else if (tab === 'appointments') navigate('/consultant/appointments');
               else if (tab === 'profile') navigate('/consultant/profile');
             }}
@@ -637,6 +648,94 @@ function ConsultantDashboard({ defaultTab }) {
                           Mark as Viewed
                         </Button>
                       )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'my-deals' && (
+        <div>
+          <h2 style={{ marginBottom: theme.spacing.md }}>My Deals</h2>
+          {myDeals.length === 0 ? (
+            <div style={commonStyles.card}>
+              <p>You're not currently involved in any deals.</p>
+              <p style={{ color: theme.colors.textSecondary, fontSize: theme.typography.fontSize.sm, marginTop: theme.spacing.sm }}>
+                Deals will appear here when you're selected as a provider, have quote requests, or are assigned to a deal.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}>
+              {myDeals.map(deal => {
+                const involvement = deal.consultant_involvement || {};
+                const roleType = deal.consultant_role_type;
+                
+                return (
+                  <div key={deal.id} style={commonStyles.card}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: theme.spacing.sm }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm, marginBottom: theme.spacing.xs }}>
+                          <h3 style={{ margin: 0 }}>Deal {deal.deal_id}</h3>
+                          {roleType && (
+                            <Badge color={theme.colors.primary}>
+                              {roleType === 'valuer' ? 'Valuer' : 
+                               roleType === 'monitoring_surveyor' ? 'Monitoring Surveyor' :
+                               roleType === 'solicitor' ? 'Solicitor' : roleType}
+                            </Badge>
+                          )}
+                          <Badge color={deal.status === 'active' ? theme.colors.success : theme.colors.gray500}>
+                            {deal.status}
+                          </Badge>
+                        </div>
+                        <p style={{ color: theme.colors.textSecondary, margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm }}>
+                          {deal.borrower_name && `Borrower: ${deal.borrower_name}`}
+                          {deal.lender_name && ` | Lender: ${deal.lender_name}`}
+                        </p>
+                        {deal.facility_type && (
+                          <p style={{ color: theme.colors.textSecondary, margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm }}>
+                            Facility: {deal.facility_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                          </p>
+                        )}
+                        {deal.current_stage_name && (
+                          <p style={{ color: theme.colors.textSecondary, margin: `${theme.spacing.xs} 0`, fontSize: theme.typography.fontSize.sm }}>
+                            Stage: {deal.current_stage_name}
+                          </p>
+                        )}
+                        <div style={{ marginTop: theme.spacing.sm, display: 'flex', gap: theme.spacing.xs, flexWrap: 'wrap' }}>
+                          {involvement.via_party && (
+                            <Badge color={theme.colors.success} style={{ fontSize: theme.typography.fontSize.xs }}>
+                              Active Party
+                            </Badge>
+                          )}
+                          {involvement.via_enquiry && (
+                            <Badge color={theme.colors.info} style={{ fontSize: theme.typography.fontSize.xs }}>
+                              Quote Request
+                            </Badge>
+                          )}
+                          {involvement.via_quote && (
+                            <Badge color={theme.colors.primary} style={{ fontSize: theme.typography.fontSize.xs }}>
+                              Quote Submitted
+                            </Badge>
+                          )}
+                          {involvement.via_selection && (
+                            <Badge color={theme.colors.success} style={{ fontSize: theme.typography.fontSize.xs }}>
+                              Selected
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: theme.spacing.sm, marginTop: theme.spacing.md }}>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => navigate(`/deals/${deal.deal_id}`)}
+                      >
+                        Open Deal Room
+                      </Button>
                     </div>
                   </div>
                 );

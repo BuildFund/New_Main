@@ -300,18 +300,27 @@ function DealRoom() {
     );
   }
 
-  const tabs = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'timeline', label: 'Timeline' },
-    { id: 'tasks', label: `Tasks (${tasks.length})` },
-    { id: 'documents', label: 'Documents' },
-    { id: 'underwriter-report', label: "Underwriter's Report" },
-    { id: 'consultants', label: 'Consultants' },
-    { id: 'legal-workspace', label: 'Legal Workspace' },
-    { id: 'drawdowns', label: 'Drawdowns' },
-    { id: 'audit-log', label: 'Audit Log' },
-    { id: 'reporting', label: 'Reporting' },
+  // Determine user role
+  const role = localStorage.getItem('role');
+  const isConsultant = role === 'Consultant';
+  const isLender = role === 'Lender';
+  const isBorrower = role === 'Borrower';
+
+  // Filter tabs based on role
+  const allTabs = [
+    { id: 'overview', label: 'Overview', roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
+    { id: 'timeline', label: 'Timeline', roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
+    { id: 'tasks', label: `Tasks (${tasks.length})`, roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
+    { id: 'documents', label: 'Documents', roles: ['Lender', 'Borrower', 'Consultant', 'Admin'] },
+    { id: 'underwriter-report', label: "Underwriter's Report", roles: ['Lender', 'Admin'] },
+    { id: 'consultants', label: 'Consultants', roles: ['Lender', 'Borrower', 'Admin'] },
+    { id: 'legal-workspace', label: 'Legal Workspace', roles: ['Lender', 'Borrower', 'Admin'] },
+    { id: 'drawdowns', label: 'Drawdowns', roles: ['Lender', 'Borrower', 'Admin'] },
+    { id: 'audit-log', label: 'Audit Log', roles: ['Lender', 'Admin'] },
+    { id: 'reporting', label: 'Reporting', roles: ['Lender', 'Admin'] },
   ];
+
+  const tabs = allTabs.filter(tab => tab.roles.includes(role || ''));
 
   // Filter tasks based on selected filters
   const filteredTasks = tasks.filter(task => {

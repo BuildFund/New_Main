@@ -59,14 +59,44 @@ class DealViewSet(viewsets.ModelViewSet):
                 'lender', 'borrower_company', 'current_stage', 'application'
             ).prefetch_related('parties', 'stages', 'tasks').all()
         
-        # Consultant sees deals they're party to
+        # Consultant sees deals they're involved with (via DealParty, ProviderEnquiry, ProviderQuote, or DealProviderSelection)
         if hasattr(user, 'consultantprofile'):
-            return Deal.objects.filter(
-                parties__user=user,
-                parties__is_active=True
-            ).select_related(
+            consultant_profile = user.consultantprofile
+            
+            # Get deals via DealParty
+            deals_via_party = Deal.objects.filter(
+                parties__consultant_profile=consultant_profile,
+                parties__appointment_status='active'
+            )
+            
+            # Get deals via ProviderEnquiry (quote requests sent to them)
+            deals_via_enquiry = Deal.objects.filter(
+                provider_enquiries__provider_firm=consultant_profile
+            )
+            
+            # Get deals via ProviderQuote (quotes they submitted)
+            # ProviderQuote.enquiry -> ProviderEnquiry.deal, and ProviderEnquiry.provider_firm = consultant
+            deals_via_quote = Deal.objects.filter(
+                provider_enquiries__provider_firm=consultant_profile,
+                provider_enquiries__quotes__isnull=False
+            )
+            
+            # Get deals via DealProviderSelection (they were selected)
+            deals_via_selection = Deal.objects.filter(
+                provider_selections__provider_firm=consultant_profile
+            )
+            
+            # Combine all deals
+            all_deals = (
+                deals_via_party |
+                deals_via_enquiry |
+                deals_via_quote |
+                deals_via_selection
+            ).distinct()
+            
+            return all_deals.select_related(
                 'lender', 'borrower_company', 'current_stage', 'application'
-            ).prefetch_related('parties', 'stages', 'tasks').distinct()
+            ).prefetch_related('parties', 'stages', 'tasks')
         
         return Deal.objects.none()
     
@@ -114,6 +144,82 @@ class DealViewSet(viewsets.ModelViewSet):
             'decisions': DealDecisionSerializer(decisions, many=True).data,
             'audit_events': AuditEventSerializer(audit_events, many=True).data,
         })
+    
+    @action(detail=False, methods=['get'], url_path='my-deals')
+    def my_deals(self, request):
+        """Get deals for the current consultant with involvement details."""
+        user = request.user
+        
+        if not hasattr(user, 'consultantprofile'):
+            return Response(
+                {'error': 'Only consultants can access this endpoint'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        consultant_profile = user.consultantprofile
+        
+        # Get all deals the consultant is involved with
+        deals = self.get_queryset()
+        
+        # Enrich with involvement details
+        enriched_deals = []
+        for deal in deals:
+            # Check involvement type
+            involvement = {
+                'via_party': DealParty.objects.filter(
+                    deal=deal,
+                    consultant_profile=consultant_profile,
+                    appointment_status='active'
+                ).exists(),
+                'via_enquiry': ProviderEnquiry.objects.filter(
+                    deal=deal,
+                    provider_firm=consultant_profile
+                ).exists(),
+                'via_quote': ProviderQuote.objects.filter(
+                    enquiry__deal=deal,
+                    enquiry__provider_firm=consultant_profile
+                ).exists(),
+                'via_selection': DealProviderSelection.objects.filter(
+                    deal=deal,
+                    provider_firm=consultant_profile
+                ).exists(),
+            }
+            
+            # Get role type if selected
+            role_type = None
+            selection = DealProviderSelection.objects.filter(
+                deal=deal,
+                provider_firm=consultant_profile
+            ).first()
+            if selection:
+                role_type = selection.role_type
+            
+            # Get party info if exists
+            party = DealParty.objects.filter(
+                deal=deal,
+                consultant_profile=consultant_profile
+            ).first()
+            if party:
+                role_type = role_type or party.party_type
+                involvement['party_type'] = party.party_type
+                involvement['acting_for_party'] = party.acting_for_party
+                involvement['appointment_status'] = party.appointment_status
+            
+            # Get active enquiry if exists
+            enquiry = ProviderEnquiry.objects.filter(
+                deal=deal,
+                provider_firm=consultant_profile
+            ).first()
+            if enquiry:
+                involvement['enquiry_status'] = enquiry.status
+                involvement['enquiry_role_type'] = enquiry.role_type
+            
+            deal_data = DealSerializer(deal).data
+            deal_data['consultant_involvement'] = involvement
+            deal_data['consultant_role_type'] = role_type
+            enriched_deals.append(deal_data)
+        
+        return Response(enriched_deals)
 
 
 class DealPartyViewSet(viewsets.ModelViewSet):
